@@ -22,6 +22,7 @@ from vecs import Vecs
 from calculate_idfs import calculate_idfs
 import cluster_exporter
 from sentiment import getSentiment
+import construct_translation_mat
 
 # Maximum distance for clustering
 CLUSTER_THRESHOLD = 0.8
@@ -68,7 +69,7 @@ class Cluster:
         self.norm      = None
         self.documents = []
         self.text      = []
-        
+
         self.lang = lang
 
         self.last_update = 0
@@ -247,7 +248,7 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
                         c.hourly_growth_rate.append(growth_rate)
 
                         # calculate sentiment for new tweets
-                        if len(c.documents) > c.last_size: 
+                        if len(c.documents) > c.last_size:
                             cluster_vector = np.mean(c.documents[c.last_size:], axis=0)
                             sentiment = getSentiment(cluster_vector)
                         else:
@@ -364,6 +365,12 @@ def load_results(filesuffix):
         clusters = pickle.load(f)
 
 def main():
+    # TODO save result instead of recalculating
+    if opt_lang == 'fi':
+        translation = construct_translation_mat.WordVectorTranslator()
+        for i in range(len(vecs.vecs)):
+            vecs.vecs[i] = translation.translate_vec(vecs.vecs[i])
+
     global idfs
     print('Loading idf')
     idfs = calculate_idfs(opt_idsf, force_recalc=False)
