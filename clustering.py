@@ -58,7 +58,7 @@ for o, a in opts:
   if o in ('-t', '--text'):
     opt_text  = a
   if o in ('-i', '--idfs'):
-    opt_idsf = a
+    opt_idfs = a
   if o in ('-l', '--lang'):
     opt_lang = a
 
@@ -373,7 +373,7 @@ def main():
 
     global idfs
     print('Loading idf')
-    idfs = calculate_idfs(opt_idsf, force_recalc=False)
+    idfs = calculate_idfs(opt_idfs, force_recalc=False)
     print('Calculating clusters')
     construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)
 
