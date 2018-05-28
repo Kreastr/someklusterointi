@@ -15,7 +15,6 @@ from sentiment import getSentiment
 import clustering
 
 ru_vocab, ru_vecs = 'vocab.txt', 'vecs.bin'
-#fi_vocab, fi_vecs= 's24_swivel_vocab.txt', 's24_swivel.bin'
 
 print('Using vecs "%s" and vocab "%s" for russian tags' % (ru_vecs, ru_vocab))
 ru_tag_classifier = generalClassifierInterface(Vecs(ru_vocab, ru_vecs), 'yandex_topic.clf', 'yandex_topic_tags.dict')

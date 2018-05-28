@@ -30,7 +30,7 @@ CLUSTER_THRESHOLD = 0.8
 ENTROPY_THRESHOLD = 3.5
 
 # TODO implement better system
-# offset finnish cluster id's to avoid id conflicts
+# offset Finnish cluster ids to avoid id conflicts
 FI_CLUSTER_ID_OFFSET = 10000000
 
 # Locality senstive hashing parameters, chosen based on the paper 'Streaming First Story Detection with applicaiton to Twitter'
@@ -92,10 +92,11 @@ clusters = {}
 next_cluster_id = FI_CLUSTER_ID_OFFSET if opt_lang == 'fi' else 0
 
 vecs = Vecs(opt_vocab, opt_embeddings)
+
 # Locality Sensitive Hashing
 lsh_engine = Engine(vecs.dim, lshashes=[RandomBinaryProjections('rpb', HYPERPLANE_COUNT) for i in range(HASH_LAYERS)], distance=lsh_distance_func)
 
-# Return closest clusters to a given sentence
+# Returns closest clusters to a given sentence, in a sorted list of (distance, cluster) tuples.
 def query_clusters(query, idfs):
 
     doc_vec = document_to_vector(query.split(' '), idfs)
@@ -106,7 +107,8 @@ def query_clusters(query, idfs):
     return sorted([(1 - doc_vec.dot(c.center) / c.norm, c) for id, c in clusters.iteritems()])
 
 
-# Returns sorted list of (distance, document text) tuples
+# Returns a sorted list of the cluster's documents as (distance, document text) tuples
+# where distance is the distance between the document's vector and the cluster center.
 def doc_distances_to_center(cluster):
     distances = []
 
@@ -115,7 +117,6 @@ def doc_distances_to_center(cluster):
         distances.append((dist, cluster.text[i]))
 
     return sorted(distances)
-
 
 def document_to_vector(word_list, idfs):
     use_idf_weighting = idfs is not None
@@ -327,42 +328,6 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
     except KeyboardInterrupt:
         print("Line: %d Clusters: %d" % (line, len(clusters)))
         print("Cancelled")
-
-def merge_clusters(a, b):
-    a.text.append(b.text)
-    a.documents.extend(b.documents)
-    for i in range(min(len(a.hourly_growth_rate), len(b.hourly_growth_rate))):
-        a.hourly_growth_rate[i] += b.hourly_growth_rate[i]
-
-def merge_close_clusters():
-    cluster_ids = clusters.keys()
-    clusters_to_remove = []
-
-    for i in range(len(clusters) - 1):
-        a = clusters[cluster_ids[i]]
-        for j in range(i + 1, len(clusters)):
-            if cluster_ids[j] not in clusters_to_remove:
-                b = clusters[cluster_ids[j]]
-                dist = 1 - a.center.dot(b.center) / (a.norm * b.norm)
-                print(dist)
-                if dist < CLUSTER_THRESHOLD:
-                    merge_clusters(a, b)
-                    clusters_to_remove.append(cluster_ids[j])
-
-    print('Merged %d clusters' % len(clusters_to_remove))
-    for id in clusters_to_remove:
-        lsh_engine.delete_vector(id, clusters[id].center)
-        del clusters[id]
-
-def save_results(filesuffix):
-    with open('clusters_%s.bin' % filesuffix,'wb') as f:
-        pickle.dump(clusters, f)
-
-def load_results(filesuffix):
-    global clusters
-
-    with open('clusters_%s.bin' % filesuffix,'rb') as f:
-        clusters = pickle.load(f)
 
 def main():
     # TODO save result instead of recalculating
