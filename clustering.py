@@ -24,6 +24,14 @@ import cluster_exporter
 from sentiment import getSentiment
 import construct_translation_mat
 
+from flask import Flask,send_from_directory,request
+flask_app = Flask("Tweet Analysis")
+
+def send_index(path):
+    return send_from_directory('visualization', path)
+    
+
+
 # Maximum distance for clustering
 CLUSTER_THRESHOLD = 0.8
 # Minimum entropy before a cluster is classified as spam
@@ -340,7 +348,11 @@ def main():
     print('Loading idf')
     idfs = calculate_idfs(opt_idfs, force_recalc=False)
     print('Calculating clusters')
-    construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)
+    construct_clusters(opt_text, from_date=datetime(2014, 7, 14), to_date=datetime(2014, 7, 20), idfs=idfs, lang=opt_lang)
+    
+    flask_app.add_url_rule('/<path>', 'send_index', send_index)  
+    flask_app.run(host='0.0.0.0',port='80', 
+            debug = True)#, ssl_context=context
 
 if __name__ == "__main__":
     main()

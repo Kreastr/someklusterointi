@@ -84,7 +84,7 @@ def save_cluster_texts(clusters_to_save):
                                                 't': tweet_timestamps[id]
                                                }
 
-                                if 'geo' in obj and obj['geo'] in not None:
+                                if 'geo' in obj and (obj['geo'] is not None):
                                     tweet_object['geo'] = obj['geo']
 
                                 text_list.append(tweet_object)

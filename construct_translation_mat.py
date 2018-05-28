@@ -5,7 +5,7 @@ import cPickle as pickle
 
 sys.path.append('/home/aminoff/SVD')
 import translation
-import fasttext
+#import fasttext
 
 class WordVectorTranslator():
     
