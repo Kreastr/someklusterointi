@@ -337,7 +337,7 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
         print("Cancelled")
         
 def send_index(path):
-    return send_from_directory('visualization', path)
+    return send_from_directory('visualisation', path)
     
 def main():
     # TODO save result instead of recalculating
