@@ -27,8 +27,7 @@ import construct_translation_mat
 from flask import Flask,send_from_directory,request
 flask_app = Flask("Tweet Analysis")
 
-def send_index(path):
-    return send_from_directory('visualization', path)
+
     
 
 
@@ -336,7 +335,10 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
     except KeyboardInterrupt:
         print("Line: %d Clusters: %d" % (line, len(clusters)))
         print("Cancelled")
-
+        
+def send_index(path):
+    return send_from_directory('visualization', path)
+    
 def main():
     # TODO save result instead of recalculating
     if opt_lang == 'fi':
@@ -352,7 +354,7 @@ def main():
     
     flask_app.add_url_rule('/<path>', 'send_index', send_index)  
     flask_app.run(host='0.0.0.0',port='80', 
-            debug = True)#, ssl_context=context
+            debug = True, use_reloader=False)#, ssl_context=context
 
 if __name__ == "__main__":
     main()
