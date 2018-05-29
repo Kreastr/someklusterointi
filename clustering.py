@@ -335,6 +335,10 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
     except KeyboardInterrupt:
         print("Line: %d Clusters: %d" % (line, len(clusters)))
         print("Cancelled")
+ 
+ 
+def get_clusters():
+    return simplejson.dumps(cluster_exporter.convert_to_dict(clusters,idfs, None))
         
 def send_index(path):
     return send_from_directory('visualisation', path)
@@ -352,6 +356,7 @@ def main():
     print('Calculating clusters')
     construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
     
+    flask_app.add_url_rule('/cluster_data_test.json', 'get_clusters', get_clusters) 
     flask_app.add_url_rule('/<path:path>', 'send_index', send_index)  
     flask_app.run(host='0.0.0.0',port='80', 
             debug = True, use_reloader=False)#, ssl_context=context
