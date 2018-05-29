@@ -23,6 +23,7 @@ from calculate_idfs import calculate_idfs
 import cluster_exporter
 from sentiment import getSentiment
 import construct_translation_mat
+from dateutil import parser
 
 from flask import Flask,send_from_directory,request
 flask_app = Flask("Tweet Analysis")
@@ -171,7 +172,7 @@ def document_to_vector(word_list, idfs):
 # followed by the whole document, all separated with spaces and without newlines.
 #
 # Note: minimum word frequency is often implemented by the vector model already
-def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=None):
+def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=None, lang=None):
     global next_cluster_id
 
     if lang != 'ru' and lang != 'fi':
@@ -205,7 +206,10 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
 
             if from_date is not None and datetime.utcfromtimestamp(tweet_time * 0.001) < from_date:
                 continue
-
+                
+            if to_date is not None and datetime.utcfromtimestamp(tweet_time * 0.001) > to_date:
+                break
+                
             # TEMP ignore gameinsight spam and short tweets
             if len(tweet_parts) < 6 or tweet.find('gameinsight') != -1:
                 continue
@@ -269,13 +273,13 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
                         c.hourly_accum_sentiment.append(sentiment)
 
                         c.last_size = len(c.text)
-                        c.hourly_keywords.append(cluster_exporter.get_keywords(c, idfs)[:3])
+                        c.hourly_keywords.append(['three','random','words'])#cluster_exporter.get_keywords(c, idfs)[:3])
 
 
                         # print quickly growing ones with high enough entropy
-                        if growth_rate < 10:
-                            continue
-
+                        #if growth_rate < 10:
+                        continue
+                        
                         entropy = cluster_exporter.calculate_cluster_entropy(c)
                         if entropy < ENTROPY_THRESHOLD:
                             continue
@@ -338,6 +342,9 @@ def construct_clusters(filename, from_line=0, from_date=None, idfs=None, lang=No
  
  
 def get_clusters():
+    day = request.args.get('day')
+    dt = parser.parse(day)
+    construct_clusters(opt_text, from_date=dt, to_date=(dt+timedelta(days=1)), idfs=idfs, lang=opt_lang)
     return simplejson.dumps(cluster_exporter.convert_to_dict(clusters,idfs, None))
         
 def send_index(path):
@@ -354,7 +361,7 @@ def main():
     print('Loading idf')
     idfs = calculate_idfs(opt_idfs, force_recalc=False)
     print('Calculating clusters')
-    construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
+    #construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
     
     flask_app.add_url_rule('/cluster_data_test.json', 'get_clusters', get_clusters) 
     flask_app.add_url_rule('/<path:path>', 'send_index', send_index)  

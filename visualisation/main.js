@@ -48,14 +48,14 @@ function show_tab(tab_name) {
 
      var cluster_snapshots = []
      var next_update_index = 0
-
+     var cluster_snapshots_by_date = []
      var ru_cluster_snapshots = []
      var next_ru_update_index = 0
      var fi_cluster_snapshots = []
      var next_fi_update_index = 0
 
      // scale up Finnish clusters to compensate for ~6 times less messages
-     const FI_SCALE_UP = Math.sqrt(6)
+     var FI_SCALE_UP = Math.sqrt(6)
 
 
      var svg = d3.select('#cluster-svg')
@@ -354,15 +354,29 @@ function show_tab(tab_name) {
          window.requestAnimationFrame(step);
        }
      }
+    
+     function prepare_cluster_data(day){
+         return d3.json('cluster_data_test.json?day='+day).then(function(data) {
+           var cluster_snapshots = data
 
-     d3.json('cluster_data_test.json').then(function(data) {
-       cluster_snapshots = data
-
-       // start at the first snapshot
-       time = cluster_snapshots[0].t * 1000
-       window.requestAnimationFrame(step);
-     })
-
+           
+           
+           cluster_snapshots_by_date[day] = cluster_snapshots
+           return day
+         })
+     }
+     
+     prepare_cluster_data('2014-07-14').then(function(day){
+         if (day == '2014-07-14') 
+            {
+                cluster_snapshots = cluster_snapshots_by_date[day];
+                // start at the first snapshot
+                next_update_index = 0
+                time = cluster_snapshots[0].t * 1000
+                window.requestAnimationFrame(step);
+            }
+     });
+ 
      function show_cluster_tooltip(cluster) {
        d3.select('#tooltip-inner-table').html('')
        d3.select('#tooltip-info')
