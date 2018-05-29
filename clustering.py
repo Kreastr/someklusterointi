@@ -352,7 +352,7 @@ def main():
     print('Calculating clusters')
     construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
     
-    flask_app.add_url_rule('/<path>', 'send_index', send_index)  
+    flask_app.add_url_rule('/<path:path>', 'send_index', send_index)  
     flask_app.run(host='0.0.0.0',port='80', 
             debug = True, use_reloader=False)#, ssl_context=context
 
