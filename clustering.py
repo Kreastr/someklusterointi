@@ -54,7 +54,7 @@ except GetoptError as e:
 
 opt_vocab = 'vocab.txt'
 opt_embeddings = 'vecs.bin'
-opt_text = 'tweet_replies_non_alpha_true-ru_lem.txt'
+opt_text = 'starting_from_2014_07_16.txt'#'tweet_replies_non_alpha_true-ru_lem.txt'
 opt_idfs = 'tweet_idfs.json'
 opt_lang = 'ru'
 
@@ -351,7 +351,7 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                     #print ([c_idx, c])        
                     if len(c.documents) > 60:  
                         def proposeKMeansSplit(X, txt):
-                            kmeans = KMeans(n_clusters=2, random_state=0).fit(X)
+                            kmeans = KMeans(n_clusters=2, random_state=(line+c_idx)).fit(X)
                             lbls = kmeans.labels_
                             z = zip(X, lbls)
                             z2 = zip(txt, lbls)

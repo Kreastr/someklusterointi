@@ -110,7 +110,11 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
     clusters_to_save = filter_interesting_clusters(clusters_to_filter)
     json_formatted = []
 
-    t_sne_space = TSNE(n_components=2, metric='cosine').fit_transform([c.center / c.norm for c in clusters_to_save])
+    cdata = [c.center / c.norm for c in clusters_to_save]
+    if len(cdata) < 5:
+        return json_formatted
+        
+    t_sne_space = TSNE(n_components=2, metric='cosine').fit_transform(cdata)
     # normalize T-SNE space to -1 to 1
     minimums = t_sne_space.min(axis=0)
     maximums = t_sne_space.max(axis=0)
