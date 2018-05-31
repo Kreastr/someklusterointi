@@ -28,7 +28,7 @@ from dateutil import parser
 from flask import Flask,send_from_directory,request
 flask_app = Flask("Tweet Analysis")
 
-
+from scipy.stats  import normaltest
     
 
 
@@ -71,7 +71,7 @@ for o, a in opts:
     opt_lang = a
 
 class Cluster:
-    def __init__(self, id, lang):
+    def __init__(self, id, lang, power=1.0):
         self.id        = id
         self.center    = None
         self.norm      = None
@@ -90,6 +90,8 @@ class Cluster:
         self.hourly_sentiment   = []
         self.hourly_accum_sentiment   = []
 
+        # power defines size of the cluster threshold and its ability to attract new messages
+        self.power = power
         self.last_size = 0
         # when growth was calculated for the first time
         self.first_growth_time = -1
@@ -295,15 +297,19 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                 continue
 
             # look for nearest cluster
-            lowest_index = -1
-            nearest_neighbours = lsh_engine.neighbours(doc_vec)
-            if len(nearest_neighbours) > 0:
-                # get closest one from tuple (cluster vector, cluster index, distance)
-                nn = min(nearest_neighbours, key=itemgetter(2))
+            def lookupNearest(doc_vec):
+                lowest_index = -1
+                nearest_neighbours = lsh_engine.neighbours(doc_vec)
+                if len(nearest_neighbours) > 0:
+                    # get closest one from tuple (cluster vector, cluster index, distance)
+                    nn = min(nearest_neighbours, key=lambda x: (x[2]/clusters[x[1]].power))
 
-                if nn[2] < CLUSTER_THRESHOLD:
-                    lowest_index = nn[1]
-
+                    if nn[2] < (CLUSTER_THRESHOLD*clusters[nn[1]].power):
+                        lowest_index = nn[1]
+                return lowest_index
+                
+            lowest_index = lookupNearest(doc_vec)
+            
             if lowest_index != -1:
                 c = clusters[lowest_index]
                 c.documents.append(doc_vec)
@@ -319,9 +325,63 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                     c.norm   = np.linalg.norm(c.center)
 
                     lsh_engine.store_vector(c.center, lowest_index)
+                
+                # Test message redistribution
+                c.center = np.mean(c.documents, axis=0)
+                nearest_neighbour_clusters = lsh_engine.neighbours(c.center)
+                if len(nearest_neighbour_clusters) > 1:
+                    
+                    # save old value
+                    power_before = c.power
+                    
+                    # gather all messages from affected clusters 
+                    message_pool = []
+                    new_pools_incr = dict()
+                    new_pools_decr = dict()
+                    for nn in nearest_neighbour_clusters:
+                        new_pools_incr[nn[1]] = list()
+                        new_pools_decr[nn[1]] = list()
+                        cluster_nn = clusters[nn[1]]
+                        for i in range(len(cluster_nn.documents)):
+                            message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
+                    
+                    # put messages in incremented set with target cluster's power incremented     
+                    c.power = power_before * 1.1
+                    
+                    for m in message_pool:
+                        lowest_index = lookupNearest(m[0])
+                        if lowest_index in new_pools_incr:
+                            new_pools_incr[lowest_index].append(m)
+                    
+                    # put messages in incremented set with target cluster's power decremented
+                    c.power = power_before / 1.1
+                    for m in message_pool:
+                        lowest_index = lookupNearest(m[0])
+                        if lowest_index in new_pools_decr:
+                            new_pools_decr[lowest_index].append(m)   
+                    
+                    # compute normal distribution probabilities
+                    prob_incr = 1.0
+                    prob_decr = 1.0
+                    
+                    for poolidx, pool in new_pools_incr.iteritems():
+                        if len(pool) > 7:
+                            prob_incr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                    
+                    for poolidx, pool in new_pools_decr.iteritems():
+                        if len(pool) > 7:
+                            prob_decr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                    
+                    # update power and messages                 
+                    c.power = power_before * 1.1 if prob_incr > prob_decr else power_before / 1.1
+                    new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
+                    for poolidx, pool  in new_clusters.iteritems():
+                        clusters[poolidx].documents = list(map(lambda x: x[0], pool))
+                        clusters[poolidx].text = list(map(lambda x: x[1], pool))
+                    
             else:
                 # no cluster found, construct new one
-                c = Cluster(next_cluster_id, lang)
+                c = Cluster(next_cluster_id, lang, power=1.0)
                 c.center = doc_vec
                 c.norm = np.linalg.norm(c.center)
 
