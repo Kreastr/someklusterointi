@@ -326,7 +326,7 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
 
                     lsh_engine.store_vector(c.center, lowest_index)
                 
-                if len(c.documents) > 20:  
+                if len(c.documents) > 40:  
                     # Test message redistribution
                     c.center = np.mean(c.documents, axis=0)
                     nearest_neighbour_clusters = lsh_engine.neighbours(c.center)
@@ -341,7 +341,7 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                         new_pools_decr = dict()
                         for nn in nearest_neighbour_clusters:
                             cluster_nn = clusters[nn[1]]
-                            if len(cluster_nn.documents) > 20:
+                            if len(cluster_nn.documents) > 40:
                                 new_pools_incr[nn[1]] = list()
                                 new_pools_decr[nn[1]] = list()
                                 for i in range(len(cluster_nn.documents)):
@@ -367,12 +367,16 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                         prob_decr = 1.0
                         
                         for poolidx, pool in new_pools_incr.iteritems():
-                            if len(pool) > 20:
+                            if len(pool) > 7:
                                 prob_incr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                            else:
+                                prob_incr *= 0.01
                         
                         for poolidx, pool in new_pools_decr.iteritems():
-                            if len(pool) > 20:
+                            if len(pool) > 7:
                                 prob_decr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                            else:
+                                prob_decr *= 0.01
                         
                         # update power and messages                 
                         c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
