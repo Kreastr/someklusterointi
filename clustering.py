@@ -15,7 +15,7 @@ import simplejson
 import numpy as np
 from nearpy import Engine
 from nearpy.hashes import RandomBinaryProjections
-from nearpy.distances import CosineDistance
+from nearpy.distances import EuclideanDistance, CosineDistance
 
 sys.path.append('./swivel')
 from vecs import Vecs
@@ -33,7 +33,7 @@ from scipy.stats  import normaltest
 
 
 # Maximum distance for clustering
-CLUSTER_THRESHOLD = 0.8
+CLUSTER_THRESHOLD = 0.8*10
 # Minimum entropy before a cluster is classified as spam
 ENTROPY_THRESHOLD = 3.5
 
@@ -44,7 +44,7 @@ FI_CLUSTER_ID_OFFSET = 10000000
 # Locality senstive hashing parameters, chosen based on the paper 'Streaming First Story Detection with applicaiton to Twitter'
 HYPERPLANE_COUNT  = 13
 HASH_LAYERS       = 7
-lsh_distance_func = CosineDistance() # 1 - cos(a)
+lsh_distance_func = EuclideanDistance()#CosineDistance() # 1 - cos(a)
 
 try:
     opts, args = getopt(sys.argv[1:], 'v:e:t:i:l:', ['vocab=', 'embeddings=', 'text=', 'idfs=', 'lang='])
@@ -327,6 +327,10 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
                     lsh_engine.store_vector(c.center, lowest_index)
                 
                 if len(c.documents) > 40:  
+                    
+                    if random.random() < 0.99:
+                        continue
+                    
                     # Test message redistribution
                     c.center = np.mean(c.documents, axis=0)
                     nearest_neighbour_clusters = lsh_engine.neighbours(c.center)
