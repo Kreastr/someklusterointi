@@ -326,59 +326,61 @@ def construct_clusters(filename, from_line=0, from_date=None, to_date=None,idfs=
 
                     lsh_engine.store_vector(c.center, lowest_index)
                 
-                # Test message redistribution
-                c.center = np.mean(c.documents, axis=0)
-                nearest_neighbour_clusters = lsh_engine.neighbours(c.center)
-                if len(nearest_neighbour_clusters) > 1:
-                    
-                    # save old value
-                    power_before = c.power
-                    
-                    # gather all messages from affected clusters 
-                    message_pool = []
-                    new_pools_incr = dict()
-                    new_pools_decr = dict()
-                    for nn in nearest_neighbour_clusters:
-                        new_pools_incr[nn[1]] = list()
-                        new_pools_decr[nn[1]] = list()
-                        cluster_nn = clusters[nn[1]]
-                        for i in range(len(cluster_nn.documents)):
-                            message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
-                    
-                    # put messages in incremented set with target cluster's power incremented     
-                    c.power = power_before * 1.1
-                    
-                    for m in message_pool:
-                        lowest_index = lookupNearest(m[0])
-                        if lowest_index in new_pools_incr:
-                            new_pools_incr[lowest_index].append(m)
-                    
-                    # put messages in incremented set with target cluster's power decremented
-                    c.power = power_before / 1.1
-                    for m in message_pool:
-                        lowest_index = lookupNearest(m[0])
-                        if lowest_index in new_pools_decr:
-                            new_pools_decr[lowest_index].append(m)   
-                    
-                    # compute normal distribution probabilities
-                    prob_incr = 1.0
-                    prob_decr = 1.0
-                    
-                    for poolidx, pool in new_pools_incr.iteritems():
-                        if len(pool) > 7:
-                            prob_incr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
-                    
-                    for poolidx, pool in new_pools_decr.iteritems():
-                        if len(pool) > 7:
-                            prob_decr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
-                    
-                    # update power and messages                 
-                    c.power = power_before * 1.1 if prob_incr > prob_decr else power_before / 1.1
-                    new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
-                    for poolidx, pool  in new_clusters.iteritems():
-                        clusters[poolidx].documents = list(map(lambda x: x[0], pool))
-                        clusters[poolidx].text = list(map(lambda x: x[1], pool))
-                    
+                if len(c.documents) > 20:  
+                    # Test message redistribution
+                    c.center = np.mean(c.documents, axis=0)
+                    nearest_neighbour_clusters = lsh_engine.neighbours(c.center)
+                    if len(nearest_neighbour_clusters) > 1:
+                        
+                        # save old value
+                        power_before = c.power
+                        
+                        # gather all messages from affected clusters 
+                        message_pool = []
+                        new_pools_incr = dict()
+                        new_pools_decr = dict()
+                        for nn in nearest_neighbour_clusters:
+                            cluster_nn = clusters[nn[1]]
+                            if len(cluster_nn.documents) > 20:
+                                new_pools_incr[nn[1]] = list()
+                                new_pools_decr[nn[1]] = list()
+                                for i in range(len(cluster_nn.documents)):
+                                    message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
+                        
+                        # put messages in incremented set with target cluster's power incremented     
+                        c.power = power_before * 1.1
+                        
+                        for m in message_pool:
+                            lowest_index = lookupNearest(m[0])
+                            if lowest_index in new_pools_incr:
+                                new_pools_incr[lowest_index].append(m)
+                        
+                        # put messages in incremented set with target cluster's power decremented
+                        c.power = power_before / 1.1
+                        for m in message_pool:
+                            lowest_index = lookupNearest(m[0])
+                            if lowest_index in new_pools_decr:
+                                new_pools_decr[lowest_index].append(m)   
+                        
+                        # compute normal distribution probabilities
+                        prob_incr = 1.0
+                        prob_decr = 1.0
+                        
+                        for poolidx, pool in new_pools_incr.iteritems():
+                            if len(pool) > 20:
+                                prob_incr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                        
+                        for poolidx, pool in new_pools_decr.iteritems():
+                            if len(pool) > 20:
+                                prob_decr *= pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                        
+                        # update power and messages                 
+                        c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
+                        new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
+                        for poolidx, pool  in new_clusters.iteritems():
+                            clusters[poolidx].documents = list(map(lambda x: x[0], pool))
+                            clusters[poolidx].text = list(map(lambda x: x[1], pool))
+                        
             else:
                 # no cluster found, construct new one
                 c = Cluster(next_cluster_id, lang, power=1.0)
