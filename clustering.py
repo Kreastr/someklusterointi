@@ -487,7 +487,7 @@ def get_clusters():
         analysers[day] = ClusterAnalyser()
         analysers[day].construct_clusters(opt_text, from_date=(dt-timedelta(hours=12)), to_date=(dt+timedelta(days=1)), idfs=idfs, lang=opt_lang)
         for c in analysers[day].clusters:
-            c.analysis_day = day
+            analysers[day].clusters[c].analysis_day = day
     
     return simplejson.dumps(cluster_exporter.convert_to_dict(analysers[day].clusters,idfs, None))
 

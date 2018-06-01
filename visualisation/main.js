@@ -274,6 +274,8 @@ function show_tab(tab_name) {
      var time_factor = 1000
      var cluster_scale = 10
      var speed_up = 1
+     var active_day = new Date('2014-07-17').toISOString();
+     
      function step(timestamp) {
 
        if (paused)
@@ -327,6 +329,7 @@ function show_tab(tab_name) {
                  sentiment_accum: new_data.sentiment,
                  tags: new_data.tags,
                  t_sne: new_data.t_sne
+                 
                }
 
                if (cluster.lang == 'ru')
@@ -366,10 +369,11 @@ function show_tab(tab_name) {
          })
      }
      
-     prepare_cluster_data('2014-07-14').then(function(day){
-         if (day == '2014-07-14') 
+     prepare_cluster_data(new Date('2014-07-17').toISOString()).then(function(day){
+         if (day == new Date('2014-07-17').toISOString()) 
             {
                 cluster_snapshots = cluster_snapshots_by_date[day];
+                active_day = new Date('2014-07-17').toISOString();
                 // start at the first snapshot
                 next_update_index = 0
                 time = cluster_snapshots[0].t * 1000
@@ -392,7 +396,7 @@ function show_tab(tab_name) {
        outer_tooltip.style('left', (Math.min(d3.event.pageX, window.innerWidth - tp_width) - 300/* tab margin */)+'px')
        outer_tooltip.style('top', Math.min(d3.event.pageY, window.innerHeight - tp_height)+'px')
 
-       d3.json('cluster_data/cluster_' + cluster.i + '.json').then(function(data) {
+       d3.json('cluster_data/cluster_' + cluster.i + '.json?day='+active_day).then(function(data) {
 
          cluster_info_str = '<span>Cluster: ' + cluster.i + ', documents: ' + data.length + '<br>Keywords:'
 
