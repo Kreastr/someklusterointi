@@ -160,6 +160,7 @@ def document_to_vector(word_list, idfs):
 class ClusterAnalyser:
     def __init__(self):
        self.resetClusters()
+       self.TUNE_INTERVAL = 10000
         
     def resetClusters(self):
         # Every new cluster gets an unique id which is the key for this dictionary
@@ -209,6 +210,161 @@ class ClusterAnalyser:
         self.clusters[self.next_cluster_id] = c
         self.next_cluster_id += 1
 
+    def tuneClusters(self):
+        line = self.line
+        for c_idx, c in list(self.clusters.iteritems()): 
+            #print ([c_idx, c])        
+            if c.last_update < line - self.TUNE_INTERVAL:
+                continue
+                
+            if len(c.documents) > 60:  
+                def proposeKMeansSplit(X, txt):
+                    kmeans = KMeans(n_clusters=2, random_state=(line+c_idx)).fit(X)
+                    lbls = kmeans.labels_
+                    z = zip(X, lbls)
+                    z2 = zip(txt, lbls)
+                    return zip(list(map(lambda x: x[0], filter(lambda x: x[1] == 0, z))), list(map(lambda x: x[0], filter(lambda x: x[1] == 0, z2)))),zip( list(map(lambda x: x[0], filter(lambda x: x[1] == 1, z))), list(map(lambda x: x[0], filter(lambda x: x[1] == 1, z2))))
+                
+                def computeNormalLikelyhood(pool):
+                    return pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
+                
+                if random.random() < 0.5:
+                    c.center = np.mean(c.documents, axis=0)
+                    a, b = proposeKMeansSplit(c.documents, c.text)
+                    if len(a) < 20:
+                        continue
+                    if len(b) < 20:
+                        continue
+                    
+                    probJoin = computeNormalLikelyhood(zip(c.documents, c.text))
+                    probSplit = computeNormalLikelyhood(a)*computeNormalLikelyhood(b)
+                    if probJoin < probSplit:
+                        c.documents = list(map(lambda x: x[0],a))
+                        c.texts = list(map(lambda x: x[0],a))
+                        self.lsh_engine.delete_vector(c_idx, c.center)
+                        c.center = np.mean(c.documents, axis=0)
+                        c.norm   = np.linalg.norm(c.center)
+                        self.lsh_engine.store_vector(c.center, c_idx)
+                        # copy time parameters for now
+                        print ("Split cluster %d into %d and %d" % (c_idx, len(a), len(b)))
+                        self.initNewCluster(list(map(lambda x: x[0],b)), list(map(lambda x: x[1],b)), c.last_update, c.created_at, c.lang)
+                else:
+                    # Test message redistribution
+                    nearest_neighbour_clusters = self.lsh_engine.neighbours(c.center)
+                    if len(nearest_neighbour_clusters) > 1:
+                        
+                        # save old value
+                        power_before = c.power
+                        
+                        # gather all messages from affected clusters 
+                        message_pool = []
+                        new_pools_incr = dict()
+                        new_pools_decr = dict()
+                        for nn in nearest_neighbour_clusters:
+                            cluster_nn = self.clusters[nn[1]]
+                            if len(cluster_nn.documents) > 40:
+                                new_pools_incr[nn[1]] = list()
+                                new_pools_decr[nn[1]] = list()
+                                for i in range(len(cluster_nn.documents)):
+                                    message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
+                        
+                        # put messages in incremented set with target cluster's power incremented     
+                        c.power = power_before * 1.1
+                        
+                        for m in message_pool:
+                            lowest_index = self.lookupNearest(m[0])
+                            if lowest_index in new_pools_incr:
+                                new_pools_incr[lowest_index].append(m)
+                        
+                        # put messages in incremented set with target cluster's power decremented
+                        c.power = power_before / 1.1
+                        for m in message_pool:
+                            lowest_index = self.lookupNearest(m[0])
+                            if lowest_index in new_pools_decr:
+                                new_pools_decr[lowest_index].append(m)   
+                        
+                        # compute normal distribution probabilities
+                        prob_incr = 1.0
+                        prob_decr = 1.0
+                        
+                        for poolidx, pool in new_pools_incr.iteritems():
+                            if len(pool) > 7:
+                                prob_incr *= computeNormalLikelyhood(pool)
+                            else:
+                                prob_incr *= 0.01
+                        
+                        for poolidx, pool in new_pools_decr.iteritems():
+                            if len(pool) > 7:
+                                prob_decr *= computeNormalLikelyhood(pool)
+                            else:
+                                prob_decr *= 0.01
+                        
+                        # update power and messages                 
+                        c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
+                        new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
+                        for poolidx, pool  in new_clusters.iteritems():
+                            self.clusters[poolidx].documents = list(map(lambda x: x[0], pool))
+                            self.clusters[poolidx].text = list(map(lambda x: x[1], pool))
+                                
+    def purgeClusters(self):
+        line = self.line
+        to_be_removed = []
+        for k, c in self.clusters.iteritems():
+            if line - c.last_update > (100000 * len(c.documents)) and len(c.documents) < 10:
+                to_be_removed.append((k, c.center))
+
+        for t in to_be_removed:
+            self.lsh_engine.delete_vector(t[0], t[1])
+            self.clusters.pop(t[0])
+
+        if len(to_be_removed) > 0:
+            print("Removed %d stagnant clusters" % len(to_be_removed))
+
+    def calcGrowthRate(self):
+        line = self.line
+        tweet_time = self.tweet_time
+        time_since_last_growth = self.time_since_last_growth
+        for id, c in self.clusters.iteritems():
+            if (c.created_at < 1405555200000): # 17/07/2014 00:00:00
+                continue
+
+            # calculate growth for first 12h
+            if len(c.hourly_growth_rate) < 12:
+                growth_rate = (len(c.text) - c.last_size) / float(time_since_last_growth) * 1000 * 60 * 60
+                if len(c.hourly_growth_rate) == 0:
+                    c.first_growth_time = tweet_time
+
+                c.hourly_growth_rate.append(growth_rate)
+
+                # calculate sentiment for new tweets
+                if len(c.documents) > c.last_size:
+                    cluster_vector = np.mean(c.documents[c.last_size:], axis=0)
+                    sentiment = getSentiment(cluster_vector)
+                else:
+                    sentiment = 0
+
+                c.hourly_sentiment.append(sentiment)
+
+                # calculate total sentiment so far
+                sentiment = getSentiment(np.mean(c.documents, axis=0))
+                c.hourly_accum_sentiment.append(sentiment)
+
+                c.last_size = len(c.text)
+                c.hourly_keywords.append(cluster_exporter.get_keywords(c, idfs)[:3])#['three','random','words']
+
+
+                # print quickly growing ones with high enough entropy
+                #if growth_rate < 10:
+                continue
+                
+                entropy = cluster_exporter.calculate_cluster_entropy(c)
+                if entropy < ENTROPY_THRESHOLD:
+                    continue
+
+                print('Quickly growing cluster %d: %d tweets, %d tweets/h, entropy %.2f\n' % (id, len(c.text), int(growth_rate), entropy))
+                print('\n'.join(random.sample(c.text, min(len(c.text), 8))))
+                print('\n\n')
+        
     # Every line in the input file should start with a timestamp in ms and id of document,
     # followed by the whole document, all separated with spaces and without newlines.
     #
@@ -222,30 +378,62 @@ class ClusterAnalyser:
         tweet_file = open(filename)
 
         try:
-            line = 0
+            self.line = 0
+            
 
             # performance counter
-            last_print_line = 0
-            last_print_time = time.time()
+            self.last_print_line = 0
+            self.last_print_time = time.time()
 
             # used for calculating hourly growth in tweet time
-            last_growth_calc = 0
-
+            self.last_growth_calc = 0
+            self.tweet_time = 0
+            
+            self.tweet_time_notz = datetime.utcfromtimestamp(0)
+                
             for tweet in tweet_file:
 
-                line += 1
-                if line < from_line:
+                self.line += 1
+                
+                if self.line < from_line:
                     continue
+                                    
+                if self.line % self.TUNE_INTERVAL == 0:
+                    self.tuneClusters()
+                    
+                # save periodically
+                if False:#self.line % 1000000 == 0 and self.line != 0:
+                    save_results(filename + '_' + str(self.line))    
+                                   
+                # remove really old clusters with a small amount of documents
+                if self.line % 100000 == 0:
+                    self.purgeClusters()
+                    
+                # print status
+                if self.line % 1000 == 0:
+                    new_time = time.time()
+                    print("Line: %d, Date: %s, Clusters: %d, %d lines/s" % (self.line, self.tweet_time_notz, len(self.clusters), int((self.line - self.last_print_line) / (new_time - self.last_print_time))))
+                    self.last_print_line = self.line
+                    self.last_print_time = new_time
+
+
+                # calculate growth rate
+                self.time_since_last_growth = self.tweet_time - self.last_growth_calc
+                if self.time_since_last_growth > 1000 * 60 * 60:
+                    self.last_growth_calc = self.tweet_time
+                    self.calcGrowthRate()
+                
+
 
                 tweet_parts = tweet.strip().split(' ')
                 try:
-                    tweet_time  = int(tweet_parts[0])
+                    self.tweet_time  = int(tweet_parts[0])
                 except ValueError:
-                    print('Invalid document on line %d: %s' % (line, tweet))
+                    print('Invalid document on line %d: %s' % (self.line, tweet))
                     continue
                 
-                tweet_time_notz = datetime.utcfromtimestamp(tweet_time * 0.001)
-                tweet_time_utc = utc.localize(tweet_time_notz)
+                self.tweet_time_notz = datetime.utcfromtimestamp(self.tweet_time * 0.001)
+                tweet_time_utc = utc.localize(self.tweet_time_notz)
                 
                 if from_date is not None and tweet_time_utc < from_date:
                     continue
@@ -258,86 +446,11 @@ class ClusterAnalyser:
                     continue
 
 
-                # remove really old clusters with a small amount of documents
-                if line % 100000 == 0:
-                    to_be_removed = []
-                    for k, c in self.clusters.iteritems():
-                        if line - c.last_update > (100000 * len(c.documents)) and len(c.documents) < 10:
-                            to_be_removed.append((k, c.center))
-
-                    for t in to_be_removed:
-                        self.lsh_engine.delete_vector(t[0], t[1])
-                        self.clusters.pop(t[0])
-
-                    if len(to_be_removed) > 0:
-                        print("Removed %d stagnant clusters" % len(to_be_removed))
-
-                # save periodically
-                if False:#line % 1000000 == 0 and line != 0:
-                    save_results(filename + '_' + str(line))
-
-                # print status
-                if line % 1000 == 0:
-                    new_time = time.time()
-                    print("Line: %d, Date: %s, Clusters: %d, %d lines/s" % (line, tweet_time_notz, len(self.clusters), int((line - last_print_line) / (new_time - last_print_time))))
-                    last_print_line = line
-                    last_print_time = new_time
-
-
-                # calculate growth rate
-                time_since_last_growth = tweet_time - last_growth_calc
-                if time_since_last_growth > 1000 * 60 * 60:
-                    last_growth_calc = tweet_time
-
-                    for id, c in self.clusters.iteritems():
-
-                        if (c.created_at < 1405555200000): # 17/07/2014 00:00:00
-                            continue
-
-                        # calculate growth for first 12h
-                        if len(c.hourly_growth_rate) < 12:
-                            growth_rate = (len(c.text) - c.last_size) / float(time_since_last_growth) * 1000 * 60 * 60
-                            if len(c.hourly_growth_rate) == 0:
-                                c.first_growth_time = tweet_time
-
-                            c.hourly_growth_rate.append(growth_rate)
-
-                            # calculate sentiment for new tweets
-                            if len(c.documents) > c.last_size:
-                                cluster_vector = np.mean(c.documents[c.last_size:], axis=0)
-                                sentiment = getSentiment(cluster_vector)
-                            else:
-                                sentiment = 0
-
-                            c.hourly_sentiment.append(sentiment)
-
-                            # calculate total sentiment so far
-                            sentiment = getSentiment(np.mean(c.documents, axis=0))
-                            c.hourly_accum_sentiment.append(sentiment)
-
-                            c.last_size = len(c.text)
-                            c.hourly_keywords.append(cluster_exporter.get_keywords(c, idfs)[:3])#['three','random','words']
-
-
-                            # print quickly growing ones with high enough entropy
-                            #if growth_rate < 10:
-                            continue
-                            
-                            entropy = cluster_exporter.calculate_cluster_entropy(c)
-                            if entropy < ENTROPY_THRESHOLD:
-                                continue
-
-                            print('Quickly growing cluster %d: %d tweets, %d tweets/h, entropy %.2f\n' % (id, len(c.text), int(growth_rate), entropy))
-                            print('\n'.join(random.sample(c.text, min(len(c.text), 8))))
-                            print('\n\n')
-
-
+                # allocate tweet to cluster
                 doc_vec = document_to_vector(tweet_parts[2:], idfs)
 
                 if doc_vec is None:
                     continue
-
-
                     
                 lowest_index = self.lookupNearest(doc_vec)
                 
@@ -345,7 +458,7 @@ class ClusterAnalyser:
                     c = self.clusters[lowest_index]
                     c.documents.append(doc_vec)
                     c.text.append(tweet.strip())
-                    c.last_update = line
+                    c.last_update = self.line
 
 
                     # update the cluster center if the cluster is small
@@ -358,104 +471,10 @@ class ClusterAnalyser:
                         self.lsh_engine.store_vector(c.center, lowest_index)
                 else:
                     # no cluster found, construct new one
-                    self.initNewCluster([doc_vec], [tweet.strip()], line, tweet_time, lang)
-                                        
-                if line % 10000 == 0:
-                    for c_idx, c in list(self.clusters.iteritems()): 
-                        #print ([c_idx, c])        
-                        if len(c.documents) > 60:  
-                            def proposeKMeansSplit(X, txt):
-                                kmeans = KMeans(n_clusters=2, random_state=(line+c_idx)).fit(X)
-                                lbls = kmeans.labels_
-                                z = zip(X, lbls)
-                                z2 = zip(txt, lbls)
-                                return zip(list(map(lambda x: x[0], filter(lambda x: x[1] == 0, z))), list(map(lambda x: x[0], filter(lambda x: x[1] == 0, z2)))),zip( list(map(lambda x: x[0], filter(lambda x: x[1] == 1, z))), list(map(lambda x: x[0], filter(lambda x: x[1] == 1, z2))))
-                            
-                            def computeNormalLikelyhood(pool):
-                                return pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
-                            
-                            if random.random() < 0.5:
-                                c.center = np.mean(c.documents, axis=0)
-                                a, b = proposeKMeansSplit(c.documents, c.text)
-                                if len(a) < 20:
-                                    continue
-                                if len(b) < 20:
-                                    continue
-                                
-                                probJoin = computeNormalLikelyhood(zip(c.documents, c.text))
-                                probSplit = computeNormalLikelyhood(a)*computeNormalLikelyhood(b)
-                                if probJoin < probSplit:
-                                    c.documents = list(map(lambda x: x[0],a))
-                                    c.texts = list(map(lambda x: x[0],a))
-                                    self.lsh_engine.delete_vector(lowest_index, c.center)
-                                    c.center = np.mean(c.documents, axis=0)
-                                    c.norm   = np.linalg.norm(c.center)
-                                    self.lsh_engine.store_vector(c.center, lowest_index)
-                                    # copy time parameters for now
-                                    print ("Split cluster %d into %d and %d" % (c_idx, len(a), len(b)))
-                                    self.initNewCluster(list(map(lambda x: x[0],b)), list(map(lambda x: x[1],b)), c.last_update, c.created_at, lang)
-                            else:
-                                # Test message redistribution
-                                nearest_neighbour_clusters = self.lsh_engine.neighbours(c.center)
-                                if len(nearest_neighbour_clusters) > 1:
-                                    
-                                    # save old value
-                                    power_before = c.power
-                                    
-                                    # gather all messages from affected clusters 
-                                    message_pool = []
-                                    new_pools_incr = dict()
-                                    new_pools_decr = dict()
-                                    for nn in nearest_neighbour_clusters:
-                                        cluster_nn = self.clusters[nn[1]]
-                                        if len(cluster_nn.documents) > 40:
-                                            new_pools_incr[nn[1]] = list()
-                                            new_pools_decr[nn[1]] = list()
-                                            for i in range(len(cluster_nn.documents)):
-                                                message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
-                                    
-                                    # put messages in incremented set with target cluster's power incremented     
-                                    c.power = power_before * 1.1
-                                    
-                                    for m in message_pool:
-                                        lowest_index = self.lookupNearest(m[0])
-                                        if lowest_index in new_pools_incr:
-                                            new_pools_incr[lowest_index].append(m)
-                                    
-                                    # put messages in incremented set with target cluster's power decremented
-                                    c.power = power_before / 1.1
-                                    for m in message_pool:
-                                        lowest_index = self.lookupNearest(m[0])
-                                        if lowest_index in new_pools_decr:
-                                            new_pools_decr[lowest_index].append(m)   
-                                    
-                                    # compute normal distribution probabilities
-                                    prob_incr = 1.0
-                                    prob_decr = 1.0
-                                    
-                                    for poolidx, pool in new_pools_incr.iteritems():
-                                        if len(pool) > 7:
-                                            prob_incr *= computeNormalLikelyhood(pool)
-                                        else:
-                                            prob_incr *= 0.01
-                                    
-                                    for poolidx, pool in new_pools_decr.iteritems():
-                                        if len(pool) > 7:
-                                            prob_decr *= computeNormalLikelyhood(pool)
-                                        else:
-                                            prob_decr *= 0.01
-                                    
-                                    # update power and messages                 
-                                    c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
-                                    new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
-                                    for poolidx, pool  in new_clusters.iteritems():
-                                        self.clusters[poolidx].documents = list(map(lambda x: x[0], pool))
-                                        self.clusters[poolidx].text = list(map(lambda x: x[1], pool))
-                                
-
-
+                    self.initNewCluster([doc_vec], [tweet.strip()], self.line, self.tweet_time, lang)
+  
         except KeyboardInterrupt:
-            print("Line: %d Clusters: %d" % (line, len(self.clusters)))
+            print("Line: %d Clusters: %d" % (self.line, len(self.clusters)))
             print("Cancelled")
  
  
