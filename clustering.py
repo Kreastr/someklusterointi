@@ -35,6 +35,8 @@ import pytz
 
 utc = pytz.utc
 
+analysers = dict();
+
 # Maximum distance for clustering
 CLUSTER_THRESHOLD = 0.8*30
 # Minimum entropy before a cluster is classified as spam
@@ -481,10 +483,21 @@ class ClusterAnalyser:
 def get_clusters():
     day = request.args.get('day')
     dt = parser.parse(day)
-    analyser = ClusterAnalyser()
-    analyser.construct_clusters(opt_text, from_date=(dt-timedelta(hours=12)), to_date=(dt+timedelta(days=1)), idfs=idfs, lang=opt_lang)
+    if day not in analysers:
+        analysers[day] = ClusterAnalyser()
+        analysers[day].construct_clusters(opt_text, from_date=(dt-timedelta(hours=12)), to_date=(dt+timedelta(days=1)), idfs=idfs, lang=opt_lang)
+        for c in analysers[day].clusters:
+            c.analysis_day = day
     
-    return simplejson.dumps(cluster_exporter.convert_to_dict(analyser.clusters,idfs, None))
+    return simplejson.dumps(cluster_exporter.convert_to_dict(analysers[day].clusters,idfs, None))
+
+def get_cluster_data(cid):
+    cid = int(cid)
+    day = request.args.get('day')
+    dt = parser.parse(day)
+    if day not in analysers:
+        return simplejson.dumps([])
+    return cluster_exporter.collectDataForCluster(analysers[day].clusters[cid])
         
 def send_index(path):
     return send_from_directory('visualisation', path)
@@ -500,6 +513,7 @@ def main():
     print('Calculating clusters')
     #construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
     
+    flask_app.add_url_rule('/cluster_data/cluster_<cid>.json', 'get_cluster_data', get_cluster_data) 
     flask_app.add_url_rule('/cluster_data_test.json', 'get_clusters', get_clusters) 
     flask_app.add_url_rule('/<path:path>', 'send_index', send_index)  
     flask_app.run(host='0.0.0.0',port='80', 

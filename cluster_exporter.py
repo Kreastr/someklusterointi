@@ -51,6 +51,48 @@ def filter_interesting_clusters(clusters):
     return interesting_clusters
 
 
+def collectDataForCluster(c):
+    text_list = []
+    tweet_timestamps = {}
+    
+    for t in c.text:
+        parts = t.split(' ')
+        tweet_timestamps[int(parts[1])] = int(parts[0])
+
+    if c.lang == 'ru':
+        # the cluster's tweets can only be in two different days' data
+        for i in range(2):
+            tweet_date = datetime.utcfromtimestamp(c.created_at / 1000) + timedelta(days=i)
+            with open('tweets_%d/%02d/%02d.ru.json' % (tweet_date.year, tweet_date.month, tweet_date.day)) as f_tweets:
+                for l in f_tweets:
+                    obj = simplejson.loads(l)
+                    id = int(obj['id'])
+                    if id in tweet_timestamps:
+                        tweet_object = {
+                                        'text': obj['text'],
+                                        'screen_name': obj['user']['screen_name'],
+                                        'id': str(obj['id']),
+                                        't': tweet_timestamps[id]
+                                       }
+
+                        if 'geo' in obj and (obj['geo'] is not None):
+                            tweet_object['geo'] = obj['geo']
+
+                        text_list.append(tweet_object)
+    elif c.lang == 'fi':
+        with open('/home/kosomaa/fi_tweets_turku_scraped/fi_mh-17.json') as f_tweets:
+            tweets = simplejson.load(f_tweets)
+            for t in tweets:
+                if int(t['id']) in ids:
+                    text_list.append({'text': t['text'],
+                        'screen_name': t['user'],
+                        'id': t['id']})
+
+
+
+    text_list.sort(key=lambda tweet: tweet['t'])
+    return simplejson.dumps(text_list)
+
 # TODO optimize by collecting all clusters' tweets at the same time to not need to
 #      read through the original data files several times.
 def save_cluster_texts(clusters_to_save):
@@ -59,48 +101,11 @@ def save_cluster_texts(clusters_to_save):
 
         print('Cluster %d/%d, id: %d' % (i + 1, len(clusters_to_save), c.id))
 
-        text_list = []
-        tweet_timestamps = {}
-
         # fetch the original tweet text
         with open('cluster_data/cluster_%d.json' % c.id, 'w') as f:
-            for t in c.text:
-                parts = t.split(' ')
-                tweet_timestamps[int(parts[1])] = int(parts[0])
-
-            if c.lang == 'ru':
-                # the cluster's tweets can only be in two different days' data
-                for i in range(2):
-                    tweet_date = datetime.utcfromtimestamp(c.created_at / 1000) + timedelta(days=i)
-                    with open('tweets_%d/%02d/%02d.ru.json' % (tweet_date.year, tweet_date.month, tweet_date.day)) as f_tweets:
-                        for l in f_tweets:
-                            obj = simplejson.loads(l)
-                            id = int(obj['id'])
-                            if id in tweet_timestamps:
-                                tweet_object = {
-                                                'text': obj['text'],
-                                                'screen_name': obj['user']['screen_name'],
-                                                'id': str(obj['id']),
-                                                't': tweet_timestamps[id]
-                                               }
-
-                                if 'geo' in obj and (obj['geo'] is not None):
-                                    tweet_object['geo'] = obj['geo']
-
-                                text_list.append(tweet_object)
-            elif c.lang == 'fi':
-                with open('/home/kosomaa/fi_tweets_turku_scraped/fi_mh-17.json') as f_tweets:
-                    tweets = simplejson.load(f_tweets)
-                    for t in tweets:
-                        if int(t['id']) in ids:
-                            text_list.append({'text': t['text'],
-                                'screen_name': t['user'],
-                                'id': t['id']})
-
-
-
-            text_list.sort(key=lambda tweet: tweet['t'])
-            simplejson.dump(text_list, f)
+            
+            text_list_str = collectDataForCluster(c)
+            f.write = text_list_str
 
 # returns a dictionary ready to be saved as a json file
 def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
