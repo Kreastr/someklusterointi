@@ -214,7 +214,10 @@ class ClusterAnalyser:
 
     def tuneClusters(self):
         line = self.line
+        deleted_clusters = []
         for c_idx, c in list(self.clusters.iteritems()): 
+            if c_idx in deleted_clusters:
+                continue
             #print ([c_idx, c])        
             if c.last_update < line - self.TUNE_INTERVAL:
                 continue
@@ -230,7 +233,7 @@ class ClusterAnalyser:
                 def computeNormalLikelyhood(pool):
                     return pow(reduce(lambda x,y: x*y, normaltest(list(map(lambda x: x[0], pool)), axis=0)[1].tolist(),1.0), 1.0/300)
                 
-                if random.random() < 0.5:
+                if random.random() < 0.3:
                     c.center = np.mean(c.documents, axis=0)
                     a, b = proposeKMeansSplit(c.documents, c.text)
                     if len(a) < 20:
@@ -243,7 +246,7 @@ class ClusterAnalyser:
                     if probJoin < probSplit:
                         c.documents = list(map(lambda x: x[0],a))
                         c.texts = list(map(lambda x: x[0],a))
-                        self.lsh_engine.delete_vector(c_idx, c.center)
+                        self.lsh_engine.delete_vector(c_idx)
                         c.center = np.mean(c.documents, axis=0)
                         c.norm   = np.linalg.norm(c.center)
                         self.lsh_engine.store_vector(c.center, c_idx)
@@ -251,62 +254,94 @@ class ClusterAnalyser:
                         print ("Split cluster %d into %d and %d" % (c_idx, len(a), len(b)))
                         self.initNewCluster(list(map(lambda x: x[0],b)), list(map(lambda x: x[1],b)), c.last_update, c.created_at, c.lang)
                 else:
-                    # Test message redistribution
-                    nearest_neighbour_clusters = self.lsh_engine.neighbours(c.center)
-                    if len(nearest_neighbour_clusters) > 1:
-                        
-                        # save old value
-                        power_before = c.power
-                        
-                        # gather all messages from affected clusters 
-                        message_pool = []
-                        new_pools_incr = dict()
-                        new_pools_decr = dict()
-                        for nn in nearest_neighbour_clusters:
-                            cluster_nn = self.clusters[nn[1]]
-                            if len(cluster_nn.documents) > 40:
-                                new_pools_incr[nn[1]] = list()
-                                new_pools_decr[nn[1]] = list()
-                                for i in range(len(cluster_nn.documents)):
-                                    message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
-                        
-                        # put messages in incremented set with target cluster's power incremented     
-                        c.power = power_before * 1.1
-                        
-                        for m in message_pool:
-                            lowest_index = self.lookupNearest(m[0])
-                            if lowest_index in new_pools_incr:
-                                new_pools_incr[lowest_index].append(m)
-                        
-                        # put messages in incremented set with target cluster's power decremented
-                        c.power = power_before / 1.1
-                        for m in message_pool:
-                            lowest_index = self.lookupNearest(m[0])
-                            if lowest_index in new_pools_decr:
-                                new_pools_decr[lowest_index].append(m)   
-                        
-                        # compute normal distribution probabilities
-                        prob_incr = 1.0
-                        prob_decr = 1.0
-                        
-                        for poolidx, pool in new_pools_incr.iteritems():
-                            if len(pool) > 7:
-                                prob_incr *= computeNormalLikelyhood(pool)
-                            else:
-                                prob_incr *= 0.01
-                        
-                        for poolidx, pool in new_pools_decr.iteritems():
-                            if len(pool) > 7:
-                                prob_decr *= computeNormalLikelyhood(pool)
-                            else:
-                                prob_decr *= 0.01
-                        
-                        # update power and messages                 
-                        c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
-                        new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
-                        for poolidx, pool  in new_clusters.iteritems():
-                            self.clusters[poolidx].documents = list(map(lambda x: x[0], pool))
-                            self.clusters[poolidx].text = list(map(lambda x: x[1], pool))
+                    if random.random() < 0.5:
+                        # Test merge with random nearest
+                        nearest_neighbour_clusters = self.lsh_engine.neighbours(c.center)
+                        if len(nearest_neighbour_clusters) > 1:
+                            ann, bnn = random.sample(nearest_neighbour_clusters, 2)
+                            
+                            a= zip(self.clusters[ann[1]].documents, self.clusters[ann[1]].text)
+                            b= zip(self.clusters[bnn[1]].documents, self.clusters[bnn[1]].text)
+                            if len(a) < 20:
+                                continue
+                            if len(b) < 20:
+                                continue
+                            if self.clusters[ann[1]].lang != self.clusters[bnn[1]].lang:
+                                continue
+                                
+                            probJoin = computeNormalLikelyhood(a+b)
+                            probSplit = computeNormalLikelyhood(a)*computeNormalLikelyhood(b)
+                            if probJoin > probSplit:
+                                 deleted_clusters.append(ann[1])
+                                 deleted_clusters.append(bnn[1])
+                                 print ("Join clusters %d (%d) and %d (%d) %f > %f" % (ann[1], len(a), bnn[1], len(b), probJoin, probSplit))
+                                 
+                                 self.initNewCluster(list(map(lambda x: x[0],a+b)), list(map(lambda x: x[1],a+b)), max(self.clusters[bnn[1]].last_update,self.clusters[ann[1]].last_update), max(self.clusters[bnn[1]].created_at,self.clusters[ann[1]].created_at), self.clusters[ann[1]].lang)
+                                 self.lsh_engine.delete_vector(ann[1])
+                                 self.clusters.pop(ann[1])
+                                 self.lsh_engine.delete_vector(bnn[1])
+                                 self.clusters.pop(bnn[1])
+                                 
+                    else:
+                        try:
+                            # Test message redistribution
+                            nearest_neighbour_clusters = self.lsh_engine.neighbours(c.center)
+                            if len(nearest_neighbour_clusters) > 1:
+                                
+                                # save old value
+                                power_before = c.power
+                                
+                                # gather all messages from affected clusters 
+                                message_pool = []
+                                new_pools_incr = dict()
+                                new_pools_decr = dict()
+                                for nn in nearest_neighbour_clusters:
+                                    cluster_nn = self.clusters[nn[1]]
+                                    if len(cluster_nn.documents) > 40:
+                                        new_pools_incr[nn[1]] = list()
+                                        new_pools_decr[nn[1]] = list()
+                                        for i in range(len(cluster_nn.documents)):
+                                            message_pool.append((cluster_nn.documents[i],cluster_nn.text[i], i))
+                                
+                                # put messages in incremented set with target cluster's power incremented     
+                                c.power = power_before * 1.1
+                                
+                                for m in message_pool:
+                                    lowest_index = self.lookupNearest(m[0])
+                                    if lowest_index in new_pools_incr:
+                                        new_pools_incr[lowest_index].append(m)
+                                
+                                # put messages in incremented set with target cluster's power decremented
+                                c.power = power_before / 1.1
+                                for m in message_pool:
+                                    lowest_index = self.lookupNearest(m[0])
+                                    if lowest_index in new_pools_decr:
+                                        new_pools_decr[lowest_index].append(m)   
+                                
+                                # compute normal distribution probabilities
+                                prob_incr = 1.0
+                                prob_decr = 1.0
+                                
+                                for poolidx, pool in new_pools_incr.iteritems():
+                                    if len(pool) > 7:
+                                        prob_incr *= computeNormalLikelyhood(pool)
+                                    else:
+                                        prob_incr *= 0.01
+                                
+                                for poolidx, pool in new_pools_decr.iteritems():
+                                    if len(pool) > 7:
+                                        prob_decr *= computeNormalLikelyhood(pool)
+                                    else:
+                                        prob_decr *= 0.01
+                                
+                                # update power and messages                 
+                                c.power = (power_before * 1.1) if prob_incr > prob_decr else (power_before / 1.1)
+                                new_clusters = new_pools_incr if prob_incr > prob_decr else new_pools_decr
+                                for poolidx, pool  in new_clusters.iteritems():
+                                    self.clusters[poolidx].documents = list(map(lambda x: x[0], pool))
+                                    self.clusters[poolidx].text = list(map(lambda x: x[1], pool))
+                        except KeyError:
+                            pass
                                 
     def purgeClusters(self):
         line = self.line
@@ -316,7 +351,7 @@ class ClusterAnalyser:
                 to_be_removed.append((k, c.center))
 
         for t in to_be_removed:
-            self.lsh_engine.delete_vector(t[0], t[1])
+            self.lsh_engine.delete_vector(t[0])
             self.clusters.pop(t[0])
 
         if len(to_be_removed) > 0:
@@ -464,8 +499,8 @@ class ClusterAnalyser:
 
 
                     # update the cluster center if the cluster is small
-                    if len(c.documents) < 100:
-                        self.lsh_engine.delete_vector(lowest_index, c.center)
+                    if len(c.documents) < 5:
+                        self.lsh_engine.delete_vector(lowest_index)
 
                         c.center = np.mean(c.documents, axis=0)
                         c.norm   = np.linalg.norm(c.center)
