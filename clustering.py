@@ -38,7 +38,7 @@ utc = pytz.utc
 analysers = dict();
 
 # Maximum distance for clustering
-CLUSTER_THRESHOLD = 0.8*30
+CLUSTER_THRESHOLD = 1.2
 # Minimum entropy before a cluster is classified as spam
 ENTROPY_THRESHOLD = 3.5
 
@@ -47,8 +47,8 @@ ENTROPY_THRESHOLD = 3.5
 FI_CLUSTER_ID_OFFSET = 10000000
 
 # Locality senstive hashing parameters, chosen based on the paper 'Streaming First Story Detection with applicaiton to Twitter'
-HYPERPLANE_COUNT  = 13
-HASH_LAYERS       = 14
+HYPERPLANE_COUNT  = 8
+HASH_LAYERS       = 8
 lsh_distance_func = EuclideanDistance()#CosineDistance() # 1 - cos(a)
 
 try:
@@ -525,14 +525,15 @@ def get_clusters():
             analysers[day].clusters[c].analysis_day = day
     
     return simplejson.dumps(cluster_exporter.convert_to_dict(analysers[day].clusters,idfs, None))
-
+    
+cache = dict()
 def get_cluster_data(cid):
     cid = int(cid)
     day = request.args.get('day')
     dt = parser.parse(day)
     if day not in analysers:
         return simplejson.dumps([])
-    return cluster_exporter.collectDataForCluster(analysers[day].clusters[cid])
+    return cluster_exporter.collectDataForCluster(analysers[day].clusters[cid], cache)
         
 def send_index(path):
     return send_from_directory('visualisation', path)

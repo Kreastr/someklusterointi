@@ -51,7 +51,11 @@ def filter_interesting_clusters(clusters):
     return interesting_clusters
 
 
-def collectDataForCluster(c):
+def collectDataForCluster(c, cache):
+    chash = hash(json.dumps(c));
+    if chash in cache:
+        return cache[chash]
+    
     text_list = []
     tweet_timestamps = {}
     
@@ -91,7 +95,8 @@ def collectDataForCluster(c):
 
 
     text_list.sort(key=lambda tweet: tweet['t'])
-    return simplejson.dumps(text_list)
+    cache[chash] = simplejson.dumps(text_list)
+    return cache[chash]
 
 # TODO optimize by collecting all clusters' tweets at the same time to not need to
 #      read through the original data files several times.

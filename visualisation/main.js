@@ -53,6 +53,7 @@ function show_tab(tab_name) {
      var next_ru_update_index = 0
      var fi_cluster_snapshots = []
      var next_fi_update_index = 0
+     var current_day = new Date('2014-07-17')
 
      // scale up Finnish clusters to compensate for ~6 times less messages
      var FI_SCALE_UP = Math.sqrt(6)
@@ -356,6 +357,12 @@ function show_tab(tab_name) {
 
          window.requestAnimationFrame(step);
        }
+       else
+       {
+            // Handle end of the day
+            cuurent_day += 3600*24
+            getAndRun(cuurent_day)
+       }
      }
     
      function prepare_cluster_data(day){
@@ -369,17 +376,23 @@ function show_tab(tab_name) {
          })
      }
      
-     prepare_cluster_data(new Date('2014-07-17').toISOString()).then(function(day){
-         if (day == new Date('2014-07-17').toISOString()) 
-            {
-                cluster_snapshots = cluster_snapshots_by_date[day];
-                active_day = new Date('2014-07-17').toISOString();
-                // start at the first snapshot
-                next_update_index = 0
-                time = cluster_snapshots[0].t * 1000
-                window.requestAnimationFrame(step);
-            }
-     });
+     
+     function getAndRun(date)
+     {
+         prepare_cluster_data(date.toISOString()).then(function(day){
+             if (day == date.toISOString()) 
+                {
+                    cluster_snapshots = cluster_snapshots_by_date[day];
+                    active_day = date.toISOString();
+                    // start at the first snapshot
+                    next_update_index = 0
+                    time = cluster_snapshots[0].t * 1000
+                    window.requestAnimationFrame(step);
+                }
+         });
+     }
+     
+     getAndRun(current_day);
  
      function show_cluster_tooltip(cluster) {
        d3.select('#tooltip-inner-table').html('')
