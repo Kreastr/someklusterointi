@@ -52,15 +52,15 @@ def filter_interesting_clusters(clusters):
 
 
 def collectDataForCluster(c, cache):
-    chash = hash(json.dumps(c));
+    chash = hash(simplejson.dumps(list(map(lambda x: x[0], c.text_data))));
     if chash in cache:
         return cache[chash]
     
     text_list = []
     tweet_timestamps = {}
     
-    for t in c.text:
-        parts = t.split(' ')
+    for t in c.text_data:
+        parts = t[0].split(' ')
         tweet_timestamps[int(parts[1])] = int(parts[0])
 
     if c.lang == 'ru':
@@ -112,8 +112,21 @@ def save_cluster_texts(clusters_to_save):
             text_list_str = collectDataForCluster(c)
             f.write = text_list_str
 
+def getTagsForTexts(c, tweets_accum):
+    words = []
+    for t in tweets_accum:
+        for w in t[0].replace('#', '').split(' '):
+            if w != '':
+                words.append(w)
+    if c.lang == 'ru':
+        tags = ru_tag_classifier.getTags([words], top_n=3)
+    elif c.lang == 'fi':
+        tags = fi_tag_classifier.getTags([words], top_n=3)
+    return tags
+
 # returns a dictionary ready to be saved as a json file
-def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
+def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs, start_time):
+    print (start_time)
     if isinstance(clusters_to_filter, dict):
         clusters_to_filter = clusters_to_filter.values()
 
@@ -138,7 +151,8 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
         idfs = ru_idfs if c.lang == 'ru' else fi_idfs
 
         # TODO remove temporary filtering
-        if (c.created_at < 1405555200000): # 17/07/2014 00:00:00
+        # 
+        if (c.created_at < start_time):#1405555200000): # 17/07/2014 00:00:00
             continue
         #if (c.created_at < 1503014400000): # 18/08/2017 00:00:00
             #continue
@@ -146,29 +160,23 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
         if len(c.hourly_growth_rate) < 1:
             continue
 
-        for i in range(len(c.hourly_growth_rate) + 1):
+
+        start_idx = int((c.created_at-start_time)/3600/1000)
+        for i in range(start_idx, len(c.hourly_growth_rate)):
             update = {}
             # timestamp
             update['t'] = int(c.first_growth_time / 1000) + i * 60 * 60
 
             # start with a new cluster event
-            if i == 0:
-
-                words = []
-                for t in c.text[:c.last_size]:
-                    for w in t.replace('#', '').split(' '):
-                        if w != '':
-                            words.append(w)
+            if i == start_idx:
 
                 total_sentiment = c.hourly_accum_sentiment[len(c.hourly_accum_sentiment) - 1]
-
-                if c.lang == 'ru':
-                    tags = ru_tag_classifier.getTags([words], top_n=3)
-                elif c.lang == 'fi':
-                    tags = fi_tag_classifier.getTags([words], top_n=3)
-
-                tags = [tag_label_overrides.get(t, t.title()) for t in tags]
-
+                
+                tags = c.hourly_tags[len(c.hourly_tags) - 1]
+                    
+                if tags is not None:
+                    tags = [tag_label_overrides.get(t, t.title()) for t in tags]
+                    
 
                 #get_keywords(c, idfs)[:4],
                 update['n'] = {c.id:                                                \
@@ -195,10 +203,30 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs):
     return json_formatted
 
 
+def get_keywords_for_message_list(text_data, idfs):
+    word_freqs = {}
+    for t in text_data:
+        for w in t[0].split(' ')[2:]:
+            if w != '':
+                if w in word_freqs:
+                    word_freqs[w] += 1
+                else:
+                    word_freqs[w] = 0
+
+    for w, c in word_freqs.iteritems():
+        # filter based on part of speech
+        if pos_filter(w, ['A', 'ADV', 'S', 'V']) and w != 'быть':
+            if w in idfs:
+                word_freqs[w] *= idfs[w]
+        else:
+            word_freqs[w] = 0
+
+    return sorted(word_freqs, key=word_freqs.get, reverse=True)
+
 def get_keywords(cluster, idfs):
     word_freqs = {}
-    for t in cluster.text[:cluster.last_size]:
-        for w in t.split(' ')[2:]:
+    for t in cluster.text_data[:cluster.last_size]:
+        for w in t[0].split(' ')[2:]:
             if w != '':
                 if w in word_freqs:
                     word_freqs[w] += 1
@@ -219,8 +247,8 @@ def calculate_cluster_entropy(cluster):
     word_counts = {}
     total_word_count = 0
 
-    for t in cluster.text:
-        for w in t.split(' ')[2:]:
+    for t in cluster.text_data:
+        for w in t[0].split(' ')[2:]:
             if w == '':
                 continue
 

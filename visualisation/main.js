@@ -275,7 +275,7 @@ function show_tab(tab_name) {
      var time_factor = 1000
      var cluster_scale = 10
      var speed_up = 1
-     var active_day = new Date('2014-07-17').toISOString();
+     var active_day = new Date('2014-07-17');
      
      function step(timestamp) {
 
@@ -315,7 +315,10 @@ function show_tab(tab_name) {
                let new_data = new_clusters[n]
 
                // put the longest keywords in the middle so that they fit better inside the circles
-               new_data.k.sort(function(a, b) { return a.length - b.length })
+               if (new_data.k)
+                    new_data.k.sort(function(a, b) { return a.length - b.length })
+               else
+                   new_data.k = ['']
 
                cluster = {
                  i: parseInt(n),
@@ -338,7 +341,7 @@ function show_tab(tab_name) {
                else if (cluster.lang == 'fi')
                  fi_clusters.set(n, cluster)
              }
-             update_simulation()
+             
            }
 
            if ('u' in cluster_snapshots[next_update_index]) {
@@ -354,14 +357,14 @@ function show_tab(tab_name) {
            }
            next_update_index++
          }
-
+         update_simulation()
          window.requestAnimationFrame(step);
        }
        else
        {
             // Handle end of the day
-            cuurent_day += 3600*24
-            getAndRun(cuurent_day)
+            current_day.setDate(current_day.getDate()+1)
+            getAndRun(current_day)
        }
      }
     
@@ -384,9 +387,18 @@ function show_tab(tab_name) {
                 {
                     cluster_snapshots = cluster_snapshots_by_date[day];
                     active_day = date.toISOString();
-                    // start at the first snapshot
+                    // start at the first snapshot greater than current time
+                    var i = 0;
+                    while (time > cluster_snapshots[i].t * 1000)
+                    {
+                        i++;
+                        if (typeof(cluster_snapshots[i]) == 'undefined'){
+                            i = i-1;
+                            break
+                        }
+                    }
                     next_update_index = 0
-                    time = cluster_snapshots[0].t * 1000
+                    time = cluster_snapshots[i].t * 1000
                     window.requestAnimationFrame(step);
                 }
          });
@@ -483,7 +495,8 @@ function show_tab(tab_name) {
        }
 
        if (cluster_update[cluster.i].k != null)
-         cluster.k = cluster_update[cluster.i].k.sort(function(a, b) { return a.length - b.length })
+         if (cluster_update[cluster.i].k)
+            cluster.k = cluster_update[cluster.i].k.sort(function(a, b) { return a.length - b.length })
 
        let size_i = d3.interpolate(cluster.s, Math.max(cluster.ts, 0))
        let sentiment_i = d3.interpolate(cluster.sentiment, new_sentiment)
