@@ -42,55 +42,68 @@ def filter_interesting_clusters(clusters):
 
         if len(c.hourly_growth_rate) == 0:
             continue
+        
+        # filter excessively small clusters
+        if len(c.documents) < 20:
+            continue
 
         if (any([g > GROWTH_RATE_MAX_THRESHOLD * modifier for g in c.hourly_growth_rate]) \
-            or sum(c.hourly_growth_rate) / len(c.hourly_growth_rate) > GROWTH_RATE_AVG_THRESHOLD * modifier)\
-           and calculate_cluster_entropy(c) > clustering.ENTROPY_THRESHOLD:
+            or sum(c.hourly_growth_rate) / len(c.hourly_growth_rate) > GROWTH_RATE_AVG_THRESHOLD * modifier):
             interesting_clusters.append(c)
-
+#\
+#           and calculate_cluster_entropy(c) > clustering.ENTROPY_THRESHOLD
     return interesting_clusters
 
 
-def collectDataForCluster(c, cache):
-    chash = hash(simplejson.dumps(list(map(lambda x: x[0], c.text_data))));
+def collectDataForCluster(c, cache, end_time):
+    chash = hash(simplejson.dumps(list(map(lambda x: x[0], c.text_data))))#+str(end_time));
     if chash in cache:
         return cache[chash]
     
     text_list = []
     tweet_timestamps = {}
-    
+    end_time -= 3*3600*1000
     for t in c.text_data:
-        parts = t[0].split(' ')
+        parts = t[0][0].split(' ')
+        #if (end_time+3*3600*1000) < int(parts[0]):
+        #    continue
+        #if (end_time-3*3600*1000) > (int(parts[0])):
+        #    continue
+            
         tweet_timestamps[int(parts[1])] = int(parts[0])
+        text_list.append({'text': t[0][1],
+                        'screen_name': t[0][2],
+                        't': int(parts[0]),#t['user'],
+                        'id': int(parts[1])})#t['id']})
 
-    if c.lang == 'ru':
-        # the cluster's tweets can only be in two different days' data
-        for i in range(2):
-            tweet_date = datetime.utcfromtimestamp(c.created_at / 1000) + timedelta(days=i)
-            with open('tweets_%d/%02d/%02d.ru.json' % (tweet_date.year, tweet_date.month, tweet_date.day)) as f_tweets:
-                for l in f_tweets:
-                    obj = simplejson.loads(l)
-                    id = int(obj['id'])
-                    if id in tweet_timestamps:
-                        tweet_object = {
-                                        'text': obj['text'],
-                                        'screen_name': obj['user']['screen_name'],
-                                        'id': str(obj['id']),
-                                        't': tweet_timestamps[id]
-                                       }
+    #if c.lang == 'ru':
+        ## the cluster's tweets can only be in two different days' data
+        #for i in range(2):
+            #tweet_date = datetime.utcfromtimestamp(c.created_at / 1000) + timedelta(days=i)
+            #with open('tweets_%d/%02d/%02d.ru.json' % (tweet_date.year, tweet_date.month, tweet_date.day)) as f_tweets:
+                #for l in f_tweets:
+                    #obj = simplejson.loads(l)
+                    #id = int(obj['id'])
+                    #if id in tweet_timestamps:
+                        #tweet_object = {
+                                        #'text': obj['text'],
+                                        #'screen_name': obj['user']['screen_name'],
+                                        #'id': str(obj['id']),
+                                        #'t': tweet_timestamps[id]
+                                       #}
 
-                        if 'geo' in obj and (obj['geo'] is not None):
-                            tweet_object['geo'] = obj['geo']
+                        #if 'geo' in obj and (obj['geo'] is not None):
+                            #tweet_object['geo'] = obj['geo']
 
-                        text_list.append(tweet_object)
-    elif c.lang == 'fi':
-        with open('/home/kosomaa/fi_tweets_turku_scraped/fi_mh-17.json') as f_tweets:
-            tweets = simplejson.load(f_tweets)
-            for t in tweets:
-                if int(t['id']) in ids:
-                    text_list.append({'text': t['text'],
-                        'screen_name': t['user'],
-                        'id': t['id']})
+                        #text_list.append(tweet_object)
+    #elif c.lang == 'fi':
+        #with open('/home/kosomaa/fi_tweets_turku_scraped/fi_mh-17.json') as f_tweets:
+            #tweets = simplejson.load(f_tweets)
+            #for t in tweets:
+                #if int(t['id']) in ids:
+                    #text_list.append({'text': t['text'],
+                        #'screen_name': t['user'],
+                        #'id': t['id']})
 
 
 
@@ -115,7 +128,7 @@ def save_cluster_texts(clusters_to_save):
 def getTagsForTexts(c, tweets_accum):
     words = []
     for t in tweets_accum:
-        for w in t[0].replace('#', '').split(' '):
+        for w in t.replace('#', '').split(' '):
             if w != '':
                 words.append(w)
     if c.lang == 'ru':
@@ -152,7 +165,7 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs, start_time):
 
         # TODO remove temporary filtering
         # 
-        if (c.created_at < start_time):#1405555200000): # 17/07/2014 00:00:00
+        if (c.created_at < (start_time-len(c.hourly_growth_rate)*3600*1000)):#1405555200000): # 17/07/2014 00:00:00
             continue
         #if (c.created_at < 1503014400000): # 18/08/2017 00:00:00
             #continue
@@ -161,7 +174,7 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs, start_time):
             continue
 
 
-        start_idx = int((c.created_at-start_time)/3600/1000)
+        start_idx = max(int((c.created_at-start_time)/3600/1000),1)
         for i in range(start_idx, len(c.hourly_growth_rate)):
             update = {}
             # timestamp
@@ -195,7 +208,7 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs, start_time):
                 # insert a negative number at the end to mark the end of the cluster
                 update['u'] = {c.id: {'s': -1}}
             else:
-                update['u'] = {c.id: {'s': int(round(c.hourly_growth_rate[i])), 'sentiment': round(c.hourly_sentiment[i], 3), 'sentiment_accum': round(c.hourly_accum_sentiment[i], 3), 'k': c.hourly_keywords[i]}}
+                update['u'] = {c.id: {'s': int(round(c.hourly_growth_rate[i])), 'sentiment': round(c.hourly_sentiment[i], 3), 'sentiment_accum': round(c.hourly_accum_sentiment[i], 3), 'k': c.hourly_keywords[i-1]}}
 
             json_formatted.append(update)
 
@@ -206,52 +219,65 @@ def convert_to_dict(clusters_to_filter, ru_idfs, fi_idfs, start_time):
 def get_keywords_for_message_list(text_data, idfs):
     word_freqs = {}
     for t in text_data:
-        for w in t[0].split(' ')[2:]:
+        #print (t)
+        #print ("\n".join(t.split(' ')[2:]))
+        for w in t.split(' ')[2:]:
             if w != '':
                 if w in word_freqs:
                     word_freqs[w] += 1
                 else:
-                    word_freqs[w] = 0
-
+                    word_freqs[w] = 1
+    #print (word_freqs)
     for w, c in word_freqs.iteritems():
         # filter based on part of speech
-        if pos_filter(w, ['A', 'ADV', 'S', 'V']) and w != 'быть':
-            if w in idfs:
-                word_freqs[w] *= idfs[w]
-        else:
+        try:
+            if pos_filter(w, ['A', 'ADV', 'S', 'V']) and (not w in ['http','быть']):
+                if w in idfs:
+                    word_freqs[w] *= idfs[w]
+            else:
+                word_freqs[w] = 0
+        except:
             word_freqs[w] = 0
-
+            
     return sorted(word_freqs, key=word_freqs.get, reverse=True)
 
 def get_keywords(cluster, idfs):
     word_freqs = {}
-    for t in cluster.text_data[:cluster.last_size]:
-        for w in t[0].split(' ')[2:]:
+    for t in cluster.text_data:
+        for w in t[0][0].split(' ')[2:]:
+            #print (w)
             if w != '':
                 if w in word_freqs:
                     word_freqs[w] += 1
+                    #print ('++')
                 else:
-                    word_freqs[w] = 0
-
+                    word_freqs[w] = 1
+                    #print ('=1')
+    #print (word_freqs)
     for w, c in word_freqs.iteritems():
         # filter based on part of speech
-        if pos_filter(w, ['A', 'ADV', 'S', 'V']) and w != 'быть':
-            if w in idfs:
-                word_freqs[w] *= idfs[w]
-        else:
+        try:
+            if pos_filter(w, ['A', 'ADV', 'S', 'V']) and (not w in ['http','быть']):
+                if w in idfs:
+                    word_freqs[w] *= idfs[w]
+            else:
+                word_freqs[w] = 0
+        except:
             word_freqs[w] = 0
-
+            
     return sorted(word_freqs, key=word_freqs.get, reverse=True)
 
-def calculate_cluster_entropy(cluster):
+def calculate_cluster_entropy(cluster, idfs):
     word_counts = {}
     total_word_count = 0
 
     for t in cluster.text_data:
-        for w in t[0].split(' ')[2:]:
+        words = filter(lambda x: len(x) > 4, t[0][0].split(' ')[2:])
+        for w in words:
             if w == '':
                 continue
-
+                
+            
             if w in word_counts:
                 word_counts[w] += 1
             else:
@@ -260,9 +286,20 @@ def calculate_cluster_entropy(cluster):
             total_word_count += 1
 
     entropy = 0
-    for w, c in word_counts.iteritems():
-        prob = float(c) / total_word_count
-        entropy += -prob * math.log(prob)
+    for t in cluster.text_data:
+        idf_sum = 0
+        msg_entropy = 0
+        words = filter(lambda x: len(x) > 4, t[0][0].split(' ')[2:])
+        for w in words:
+            idf = idfs.get(w, 1)
+            #for w, c in word_counts.iteritems():
+            c = word_counts[w]
+            prob = float(c) / total_word_count
+            msg_entropy += -idf * math.log(prob)/math.log(2)/float(len(cluster.text_data))
+            idf_sum += idf
+            
+        msg_entropy /= idf_sum
+        entropy += msg_entropy
 
     return entropy
 

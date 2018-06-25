@@ -53,7 +53,7 @@ function show_tab(tab_name) {
      var next_ru_update_index = 0
      var fi_cluster_snapshots = []
      var next_fi_update_index = 0
-     var current_day = new Date('2014-07-17')
+     var current_day = new Date('2014-07-02')
 
      // scale up Finnish clusters to compensate for ~6 times less messages
      var FI_SCALE_UP = Math.sqrt(6)
@@ -271,45 +271,17 @@ function show_tab(tab_name) {
      }
 
      var last_step = null;
-     var time = 0
+     var time = current_day.getTime()
      var time_factor = 1000
      var cluster_scale = 10
      var speed_up = 1
      var active_day = new Date('2014-07-17');
      
-     function step(timestamp) {
-
-       if (paused)
-         return
-
-       if (!last_step) last_step = timestamp
-       let dt = timestamp - last_step 
-
-       // cap delta time to 200ms
-       if (dt > 200)
-         dt = 200
-
-       last_step = timestamp
-
-       // TODO cluster_elements.filter does not work properly if using while?
-       // cluster_elements.filter is returning elements that do not satisfy the condition.
-       // Right now only one update per frame is processed which is not quick enough sometimes.
-       if (next_update_index < cluster_snapshots.length) {
-         if (cluster_snapshots[next_update_index].t >= time * 0.001) { // TODO Remove when while is implemented properly 
-           /*if (visible_clusters.empty())
-              speed_up = speed_up * 0.999 + 0.001 * 4
-              else
-              speed_up = speed_up * 0.99 + 0.01*/
-
-           time += dt * time_factor * speed_up
-         }
-
-         d3.select('#time_text').text(new Date(time).toLocaleString('en-GB'))
-
-         if (cluster_snapshots[next_update_index].t < time * 0.001) {
-
-           if ('n' in cluster_snapshots[next_update_index]) {
-             let new_clusters = cluster_snapshots[next_update_index].n
+     
+     function process_cluster_data(ncluster)
+       {
+           if ('n' in ncluster) {
+             let new_clusters = ncluster.n
 
              for (let n in new_clusters) {
                let new_data = new_clusters[n]
@@ -344,9 +316,10 @@ function show_tab(tab_name) {
              
            }
 
-           if ('u' in cluster_snapshots[next_update_index]) {
-             let update = cluster_snapshots[next_update_index].u
-             cluster_elements.filter(function(cluster) { return cluster.i in update })
+           if ('u' in ncluster) {
+             let update = ncluster.u
+             if (typeof(cluster_elements) != 'undefined')
+                cluster_elements.filter(function(cluster) { return cluster.i in update })
                                                               .transition().duration(1000)
                                                               .tween('size', function(cluster) {
                                                                 return cluster_param_interpolator(cluster, update)
@@ -355,9 +328,85 @@ function show_tab(tab_name) {
                                                               .selectAll('text')
                                                               .text(function(cluster, text_index) { return cluster.k[text_index] })
            }
+       }
+     
+     function step(timestamp) {
+
+       if (paused)
+         return
+
+       if (!last_step) last_step = timestamp
+       let dt = timestamp - last_step 
+
+       // cap delta time to 200ms
+       if (dt > 200)
+         dt = 200
+
+       last_step = timestamp
+
+       // TODO cluster_elements.filter does not work properly if using while?
+       // cluster_elements.filter is returning elements that do not satisfy the condition.
+       // Right now only one update per frame is processed which is not quick enough sometimes.
+       if (next_update_index < cluster_snapshots.length) {
+         if (cluster_snapshots[next_update_index].t >= time * 0.001) { // TODO Remove when while is implemented properly 
+           /*if (visible_clusters.empty())
+              speed_up = speed_up * 0.999 + 0.001 * 4
+              else
+              speed_up = speed_up * 0.99 + 0.01*/
+
+           time += dt * time_factor * speed_up
+         }
+
+         d3.select('#time_text').text(new Date(time).toLocaleString('en-GB'))
+
+         if (cluster_snapshots[next_update_index].t < time * 0.001) {
+           
+           
+           if (cluster_snapshots[next_update_index].t < ((time - 200) * 0.001)){
+               var delayed_clusters = [];
+               
+               while ((cluster_snapshots[next_update_index].t < ((time - 200) * 0.001)) && (next_update_index < (cluster_snapshots.length-1))) {
+                   if ('n' in cluster_snapshots[next_update_index]){
+                         let new_clusters = cluster_snapshots[next_update_index].n
+
+                         for (let n in new_clusters) {
+                             delayed_clusters[n] = new_clusters[n]
+                         }
+                     }
+                     
+                   if ('u' in cluster_snapshots[next_update_index]){
+                         let update = cluster_snapshots[next_update_index].u
+
+                         for (let n in update) {
+                             if (update[n].s > 0)
+                             {
+                                 if (typeof(delayed_clusters[n]) != 'undefined')
+                                 {
+                                     delayed_clusters[n].s = update[n].s;
+                                     delayed_clusters[n].sentiment_total = update[n].sentiment_total
+                                     delayed_clusters[n].sentiment = update[n].sentiment
+                                     if (typeof(update[n].k) != 'undefined')
+                                        delayed_clusters[n].k = update[n].k;
+                                     if (typeof(update[n].tags) != 'undefined')
+                                        delayed_clusters[n].tags = update[n].tags;
+                                 }
+                             }
+                             else
+                             {
+                                 delayed_clusters.pop(n);
+                             }
+                         
+                         }
+                     }
+               next_update_index++;       
+               }
+               process_cluster_data({n: delayed_clusters});  
+           }
+           process_cluster_data(cluster_snapshots[next_update_index]);
+           
            next_update_index++
          }
-         update_simulation()
+         update_simulation();
          window.requestAnimationFrame(step);
        }
        else
@@ -387,6 +436,8 @@ function show_tab(tab_name) {
                 {
                     cluster_snapshots = cluster_snapshots_by_date[day];
                     active_day = date.toISOString();
+                    ru_clusters = d3.map([], function(d) { return d.i })
+                    fi_clusters = d3.map([], function(d) { return d.i })
                     // start at the first snapshot greater than current time
                     var i = 0;
                     while (time > cluster_snapshots[i].t * 1000)
@@ -421,7 +472,7 @@ function show_tab(tab_name) {
        outer_tooltip.style('left', (Math.min(d3.event.pageX, window.innerWidth - tp_width) - 300/* tab margin */)+'px')
        outer_tooltip.style('top', Math.min(d3.event.pageY, window.innerHeight - tp_height)+'px')
 
-       d3.json('cluster_data/cluster_' + cluster.i + '.json?day='+active_day).then(function(data) {
+       d3.json('cluster_data/cluster_' + cluster.i + '.json?day='+active_day+'&time='+(time+10800*1000)).then(function(data) {
 
          cluster_info_str = '<span>Cluster: ' + cluster.i + ', documents: ' + data.length + '<br>Keywords:'
 
