@@ -54,7 +54,7 @@ SPLIT_JOIN_BALANCE = 1
 FI_CLUSTER_ID_OFFSET = 10000000
 
 # Locality senstive hashing parameters, chosen based on the paper 'Streaming First Story Detection with applicaiton to Twitter'
-HYPERPLANE_COUNT  = 10
+HYPERPLANE_COUNT  = 15
 HASH_LAYERS       = 8
 lsh_distance_func = EuclideanDistance()#CosineDistance() # 1 - cos(a)
 
@@ -406,7 +406,7 @@ def getMinCutProb(nodes, links):
 
     return (min_cut_nodes)
 
-def buildSimGraph(txt):
+def buildSimGraph(txt, simgraphparams):
     links = []
     nodes = range(len(txt))
     detached_nodes = []
@@ -415,8 +415,13 @@ def buildSimGraph(txt):
         for j in range(i):
             if not i == j:
                 sim = computeSimilarity(txt[i][0][0],txt[j][0][0])
-                dropch = random.random() **2
-                if sim > dropch:
+                drop = False
+                if simgraphparams['usedropout']:
+                    dropch = random.random() **2
+                    if sim > dropch:
+                        drop = True
+                        
+                if not drop:
                     links.append([i, j, sim])
                     links.append([j, i, sim])
                     
@@ -431,7 +436,7 @@ def buildSimGraph(txt):
             detached_nodes.append(i)
     return (nodes,links,detached_nodes)
     
-def getClusterEntropySplit(txt):
+def getClusterEntropySplit(txt, fraction=0.05):
     word_counts = {}
     total_word_count = 0
 
@@ -463,7 +468,7 @@ def getClusterEntropySplit(txt):
     enums = list(enumerate(entropies))
     enums.sort(key=lambda x: x[1])
     #print (enums)
-    return list( map(lambda x:x[0],enums[-int(len(txt)/20):]))
+    return list( map(lambda x:x[0],enums[-int(len(txt)*fraction):]))
 
 
 def getClusterRandomKeywordSplit(txt):
@@ -500,22 +505,41 @@ def getClusterRandomKeywordSplit(txt):
     return marked
       
 
-def proposeWordSimilaritySplit(X, txt, line, c_idx):
+def proposeWordSimilaritySplit(X, txt, line, c_idx, cutters, simgraphparams):
     
-    if len(txt) > 500:
-        min_cut_nodes = getClusterRandomKeywordSplit(txt)
-    else:
-        (nodes,links,detached_nodes) = buildSimGraph(txt)
-        
+    for ll, ul, cutter in cutters:
+        if not ll is None:
+            if len(txt) < ll:
+                continue
+        if not ul is None:
+            if len(txt) > ul:
+                continue
+        if cutter == 'getClusterRandomKeywordSplit':
+            min_cut_nodes = getClusterRandomKeywordSplit()
+            break
+        if cutter == 'getClusterEntropySplit':
+            min_cut_nodes = getClusterEntropySplit(txt, fraction=0.05)   
+            break       
+        (nodes,links,detached_nodes) = buildSimGraph(txt, simgraphparams)
+            
         if len(detached_nodes) > 0:
             #print ("Found %d detached nodes" % len(detached_nodes))
             min_cut_nodes = detached_nodes
+            break
         else:
             #if len(txt) > 40:
             #min_cut_nodes = getRandomContractionsMinCut(nodes, links)     
-            min_cut_nodes = getRandomContractionsMinCut(nodes, links)          
-            #else:
-            #    min_cut_nodes = getMinCut(nodes, links)           
+            if cutter == 'getRandomContractionsMinCut':
+                min_cut_nodes = getRandomContractionsMinCut(nodes, links)     
+                break     
+            if cutter == 'getMinCut':
+                min_cut_nodes = getMinCut(nodes, links)   
+                break        
+            if cutter == 'getMinCutProb':
+                min_cut_nodes = getMinCutProb(nodes, links)   
+                break
+
+                
     lbls = list(map(lambda x: 1 if x in min_cut_nodes else 0, range(len(txt))))            
     z = zip(X, lbls)
     z2 = zip(txt, lbls)
@@ -543,7 +567,8 @@ def computeEntropyLikelyhood(c, idfs):
 #    return normaltest(np.concatenate((radii,-radii)))[1]
 
 
-def getSplitsWorker(c_idx, c, min_update, useentropy):
+def getSplitsWorker(c_idx, c, params):
+    min_update, useentropy, cutters, simgraphparams = params
     try:
         if len(c.documents) < 20:  
             return (c_idx, dict(result=False))
@@ -552,13 +577,20 @@ def getSplitsWorker(c_idx, c, min_update, useentropy):
             return (c_idx, dict(result=False))
                 
         c.center = np.mean(c.documents, axis=0)
-        #a, b = proposeKMeansSplit(c.documents, c.text_data, min_update, c_idx)
         
-        a, b = proposeWordSimilaritySplit(c.documents, c.text_data, min_update, c_idx)
+        if useentropy:
+            a, b = proposeWordSimilaritySplit(c.documents, c.text_data, min_update, c_idx, cutters, simgraphparams)
+        else:
+            a, b = proposeKMeansSplit(c.documents, c.text_data, min_update, c_idx)
     
         if len(a) < 1:
             return (c_idx, dict(result=False))
         if len(b) < 1:
+            return (c_idx, dict(result=False))
+         
+        if len(b) < 20 and (not useentropy):  
+            return (c_idx, dict(result=False))
+        if len(a) < 20 and (not useentropy):  
             return (c_idx, dict(result=False))
         
         if useentropy:
@@ -567,11 +599,11 @@ def getSplitsWorker(c_idx, c, min_update, useentropy):
             probJoin = computeEntropyLikelyhood(c,idfs)
             wa = len(a)/(float(len(a))+len(b))
             
-            probSplit = (wa*computeEntropyLikelyhood(ca,idfs)+(1-wa)*computeEntropyLikelyhood(cb,idfs))+(wa*math.log(wa)/math.log(2)+(1-wa)*math.log((1-wa))/math.log(2)) 
+            probSplit = (wa*computeEntropyLikelyhood(ca,idfs)+(1-wa)*computeEntropyLikelyhood(cb,idfs))+(wa*math.log(wa)/math.log(2)+(1-wa)*math.log((1-wa))/math.log(2))+random.random() 
         else:
             probJoin = computeNormalLikelyhood(zip(c.documents, c.text_data))
             probSplit = computeNormalLikelyhood(a)*computeNormalLikelyhood(b)
-        if probJoin < (probSplit+random.random()):
+        if probJoin < probSplit:
             return (c_idx, dict(result=True, a=a, b=b,probSplit=probSplit,probJoin=probJoin))
         else:
             return (c_idx, dict(result=False))
@@ -581,7 +613,7 @@ def getSplitsWorker(c_idx, c, min_update, useentropy):
         
                 
 def doAnalyseSplit(x):
-    return getSplitsWorker(x[0][0],x[0][1],x[1][0], x[1][1])
+    return getSplitsWorker(x[0][0],x[0][1],x[1])
 
 
 def makeNewCluster(next_cluster_id, doc_vec, tweet_data, line, tweet_time, lang, tweet_post_time):
@@ -638,6 +670,13 @@ class ClusterAnalyser:
        self.store_join_cnt = 20
        self.p = Pool(20)
        self.entropyLikelyhood = True
+       self.tuneClusters = True
+       self.cutters = [[0,None,'getRandomContractionsMinCut']]
+       self.simgraphparams = dict(usedropout=False)
+       self.max_runtime = 1200
+       self.start_time = None
+       self.overrun = False
+       self.min_lines_per_second = 20
         
     def resetClusters(self):
         # Every new cluster gets an unique id which is the key for this dictionary
@@ -694,13 +733,13 @@ class ClusterAnalyser:
  
 
 
-    def tuneClusters(self):
+    def tuneClustersCall(self):
         line = self.line
         deleted_clusters = []
         print ('parallel preprocessing ... ')
         #parallel preprocessing 
         dlist = list(self.clusters.iteritems())
-        params = [[self.line - self.TUNE_INTERVAL, self.entropyLikelyhood]]*len(dlist)
+        params = [[self.line - self.TUNE_INTERVAL, self.entropyLikelyhood, self.cutters, self.simgraphparams]]*len(dlist)
         split_test_out = dict(self.p.map(doAnalyseSplit, zip(dlist, params)))
         
 
@@ -746,10 +785,10 @@ class ClusterAnalyser:
                     
                     a= zip(self.clusters[ann[1]].documents, self.clusters[ann[1]].text_data)
                     b= zip(self.clusters[bnn[1]].documents, self.clusters[bnn[1]].text_data)
-                    #if len(a) < 20 or len(a) > 500 :
-                    #    continue
-                    #if len(b) < 20 or len(b) > 500 :
-                    #    continue
+                    if len(a) < 20 and (not self.entropyLikelyhood): #or len(a) > 500 :
+                        continue
+                    if len(b) < 20 and (not self.entropyLikelyhood):  #or len(b) > 500 :
+                        continue
                     if self.clusters[ann[1]].lang != self.clusters[bnn[1]].lang:
                         continue
                         
@@ -757,11 +796,11 @@ class ClusterAnalyser:
                         c = makeNewCluster(self.next_cluster_id, list(map(lambda x: x[0],a+b)), list(map(lambda x: x[1][0],a+b)), max(self.clusters[bnn[1]].last_update,self.clusters[ann[1]].last_update), max(self.clusters[bnn[1]].created_at,self.clusters[ann[1]].created_at), self.clusters[ann[1]].lang, list(map(lambda x: x[1][1],a+b)))
                         probJoin = computeEntropyLikelyhood(c, idfs)
                         wa = len(a)/(float(len(a))+len(b))
-                        probSplit = (wa*computeEntropyLikelyhood(self.clusters[ann[1]],idfs)+(1-wa)*computeEntropyLikelyhood(self.clusters[bnn[1]],idfs))+(wa*math.log(wa)/math.log(2)+(1-wa)*math.log((1-wa))/math.log(2))                        
+                        probSplit = (wa*computeEntropyLikelyhood(self.clusters[ann[1]],idfs)+(1-wa)*computeEntropyLikelyhood(self.clusters[bnn[1]],idfs))+(wa*math.log(wa)/math.log(2)+(1-wa)*math.log((1-wa))/math.log(2))+random.random()                        
                     else:
                         probJoin = computeNormalLikelyhood(a+b)
                         probSplit = computeNormalLikelyhood(a)*computeNormalLikelyhood(b)
-                    if probJoin > (probSplit+random.random()):
+                    if probJoin > probSplit:
                          deleted_clusters.append(ann[1])
                          deleted_clusters.append(bnn[1])
                          print ("Join clusters %d (%d) and %d (%d) %f > %f" % (ann[1], len(a), bnn[1], len(b), probJoin, probSplit))
@@ -846,7 +885,10 @@ class ClusterAnalyser:
     #
     # Note: minimum word frequency is often implemented by the vector model already
     def construct_clusters(self, filename, from_line=0, from_date=None, to_date=None,idfs=None, lang=None):
-
+        
+        self.start_time = time.time()
+        
+        
         if lang != 'ru' and lang != 'fi':
             print("Lang must be 'ru' or 'fi'")
             return
@@ -868,6 +910,10 @@ class ClusterAnalyser:
             self.tweet_time_notz = datetime.utcfromtimestamp(0)
                 
             for twlineesc in tweet_file:
+                if  time.time() - self.start_time > self.max_runtime:
+                    self.overrun = True
+                    break
+                
                 twline = twlineesc.decode('unicode-escape').encode('utf-8')
                 if len(twline) < 2:
                     continue
@@ -884,11 +930,13 @@ class ClusterAnalyser:
                 
                 if self.line < from_line:
                     continue
-                                    
-                if self.line % self.TUNE_INTERVAL == 0:
-                    #pr.disable()
-                    self.tuneClusters()
-                    #pr.enable()
+                               
+                               
+                if self.tuneClusters:
+                    if self.line % self.TUNE_INTERVAL == 0:
+                        #pr.disable()
+                        self.tuneClustersCall()
+                        #pr.enable()
                     
 
                     
@@ -904,7 +952,8 @@ class ClusterAnalyser:
                 if self.line % 1000 == 0:
                     #pr.disable()
                     new_time = time.time()
-                    print("Line: %d, Date: %s, Clusters: %d, %d lines/s AVG candidates: %d" % (self.line, self.tweet_time_notz, len(self.clusters), int((self.line - self.last_print_line) / (new_time - self.last_print_time)), int(self.ncnttot/(self.ncntq+0.0000001))))
+                    lps = int((self.line - self.last_print_line) / (new_time - self.last_print_time))
+                    print("Line: %d, Date: %s, Clusters: %d, %d lines/s AVG candidates: %d" % (self.line, self.tweet_time_notz, len(self.clusters), lps, int(self.ncnttot/(self.ncntq+0.0000001))))
                     #if  int((self.line - self.last_print_line) / (new_time - self.last_print_time)) < 50:
                     #    s = StringIO.StringIO()
                     #    sortby = 'cumulative'
@@ -915,6 +964,9 @@ class ClusterAnalyser:
                     self.last_print_time = new_time
                     self.ncnttot = 0
                     self.ncntq = 0
+                    if  time.time() - self.start_time > self.max_runtime or lps < self.min_lines_per_second:
+                        self.overrun = True
+                        break
                     #pr.enable()
 
 
