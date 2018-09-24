@@ -14,7 +14,7 @@ def getMDV(vec):
 class generalClassifierInterface():
     
     def __init__(self, dictionary, classifier, class_tags=None):
-        self.bc = pickle.load(open(dictionary,"rb"))
+        self.bc = dictionary#pickle.load(open(dictionary,"rb"))
         self.clf = pickle.load(open(classifier,"rb"))
         if class_tags:
             self.ct = pickle.load(open(class_tags,"rb"))
@@ -31,7 +31,7 @@ class generalClassifierInterface():
         if len(wvecs) > 0:
             mdv = getMDV(wvecs)
             classid = self.clf.predict_proba([mdv])[0]
-            #print (classid)
+
             best_n = np.argsort(classid)[-top_n:]
             #print (best_n)
             if self.ct:

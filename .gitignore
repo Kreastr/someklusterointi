@@ -1,0 +1,6 @@
+.*
+*.txt
+*.pyc
+*.bin
+*.json
+swivel_data/
