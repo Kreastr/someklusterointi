@@ -1,6 +1,7 @@
 # Twitter Clustering
 
-*Contributors: Onni Kosomaa, Aleksei Romanenko*
+*Contributors: Onni Kosomaa, Aleksei Romanenko, Christoffer Aminoff*
+*Supervisor: Prof. Jouko Vankka*
 
 The Python data processing scripts are in this folder.
 
