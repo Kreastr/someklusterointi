@@ -6,7 +6,7 @@ import codecs
 import csv
 
 
-# from https://stackoverflow.com/questions/21030391/how-to-normalize-array-numpy
+# Function normalized by Eelco Hoogendoorn and Guillaume Jacquenot from https://stackoverflow.com/questions/21030391/how-to-normalize-array-numpy
 def normalized(a, axis=-1, order=2):
     """Utility function to normalize the rows of a numpy array."""
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
