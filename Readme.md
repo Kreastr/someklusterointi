@@ -1,5 +1,7 @@
 # Twitter Clustering
 
+[![DOI](https://zenodo.org/badge/150116364.svg)](https://zenodo.org/badge/latestdoi/150116364)
+
 *Contributors: Onni Kosomaa, Aleksei Romanenko, Christoffer Aminoff*
 *Supervisor: Prof. Jouko Vankka*
 
