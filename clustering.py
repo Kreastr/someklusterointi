@@ -1077,7 +1077,13 @@ def main():
         for i in range(len(vecs.vecs)):
             vecs.vecs[i] = translation.translate_vec(vecs.vecs[i])
 
+<<<<<<< HEAD
 
+=======
+    global idfs
+    print('Loading idf')
+    idfs = calculate_idfs(opt_idfs, force_recalc=False)
+>>>>>>> 1d262d7... typo fix
     print('Calculating clusters')
     #construct_clusters(opt_text, from_date=datetime(2014, 7, 14), idfs=idfs, lang=opt_lang)#, to_date=datetime(2014, 7, 20)
     
